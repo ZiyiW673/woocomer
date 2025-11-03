@@ -187,29 +187,49 @@ function ptcgdm_build_one_piece_series_config(array $definition) {
   return $groups;
 }
 
+function ptcgdm_get_one_piece_set_label_overrides() {
+  return [
+    'op03' => '-PILLARS OF STRENGTH- [OP-03]',
+    'op05' => '-AWAKENING OF THE NEW ERA- [OP-05]',
+  ];
+}
+
+function ptcgdm_resolve_one_piece_set_label($set_id, $detected_label = '') {
+  $key = strtolower(trim((string) $set_id));
+  $overrides = ptcgdm_get_one_piece_set_label_overrides();
+  if ($key !== '' && isset($overrides[$key])) {
+    return $overrides[$key];
+  }
+
+  $label = trim((string) $detected_label);
+  if ($label !== '') {
+    return $label;
+  }
+
+  return strtoupper((string) $set_id);
+}
+
 function ptcgdm_extract_one_piece_set_label($path, $set_id) {
   $content = @file_get_contents($path);
-  if (!$content) {
-    return strtoupper($set_id);
-  }
-
-  $decoded = json_decode($content, true);
-  if (is_array($decoded)) {
-    $items = $decoded;
-    if (isset($decoded['data']) && is_array($decoded['data'])) {
-      $items = $decoded['data'];
-    }
-    foreach ($items as $item) {
-      if (!is_array($item)) {
-        continue;
+  if ($content) {
+    $decoded = json_decode($content, true);
+    if (is_array($decoded)) {
+      $items = $decoded;
+      if (isset($decoded['data']) && is_array($decoded['data'])) {
+        $items = $decoded['data'];
       }
-      if (!empty($item['set']['name'])) {
-        return trim((string) $item['set']['name']);
+      foreach ($items as $item) {
+        if (!is_array($item)) {
+          continue;
+        }
+        if (!empty($item['set']['name'])) {
+          return ptcgdm_resolve_one_piece_set_label($set_id, $item['set']['name']);
+        }
       }
     }
   }
 
-  return strtoupper($set_id);
+  return ptcgdm_resolve_one_piece_set_label($set_id, '');
 }
 
 
