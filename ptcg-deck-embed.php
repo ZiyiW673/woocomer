@@ -4613,22 +4613,45 @@ function ptcgdm_remove_inventory_card_entry($card_id) {
 
 function ptcgdm_delete_inventory_product_by_card($card_id) {
   $card_id = trim((string) $card_id);
-  if ($card_id === '' || !function_exists('wc_get_product_id_by_sku')) {
+  if ($card_id === '') {
     return ['deleted' => false];
   }
 
-  $product_id = wc_get_product_id_by_sku($card_id);
+  if (!function_exists('wc_get_product_id_by_sku') || !function_exists('wc_get_product') || !class_exists('WC_Product')) {
+    return ['deleted' => false];
+  }
+
+  $product_id = (int) wc_get_product_id_by_sku($card_id);
+
+  if (!$product_id && function_exists('wc_get_products')) {
+    $matches = wc_get_products([
+      'limit'      => 1,
+      'return'     => 'ids',
+      'status'     => ['publish', 'pending', 'draft', 'private'],
+      'meta_query' => [[
+        'key'   => '_ptcgdm_card_id',
+        'value' => $card_id,
+      ]],
+    ]);
+    if (!empty($matches)) {
+      $product_id = (int) $matches[0];
+    }
+  }
+
   if (!$product_id) {
     return ['deleted' => false];
   }
 
-  if (!function_exists('wc_get_product') || !class_exists('WC_Product')) {
-    return ['deleted' => false];
+  $product = wc_get_product($product_id);
+  if (!($product instanceof WC_Product)) {
+    return ['deleted' => false, 'product_id' => $product_id];
   }
 
-  $product = wc_get_product($product_id);
-  if (!($product instanceof WC_Product) || !ptcgdm_is_managed_product($product)) {
-    return ['deleted' => false, 'product_id' => $product_id];
+  if (!ptcgdm_is_managed_product($product)) {
+    $product_card_id = method_exists($product, 'get_meta') ? (string) $product->get_meta('_ptcgdm_card_id') : '';
+    if ($product_card_id !== $card_id) {
+      return ['deleted' => false, 'product_id' => $product_id];
+    }
   }
 
   $is_variable = false;
