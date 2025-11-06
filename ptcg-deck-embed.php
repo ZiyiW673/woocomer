@@ -1066,6 +1066,7 @@ function ptcgdm_render_builder(array $config = []){
                   c.set.name = label;
                 }
               }
+              applyDatasetSpecificCardAdjustments(c);
               registerCardNumberIndex(canonicalId, c);
               registerCardNameIndex(canonicalId, c);
               byId.set(c.id,c);
@@ -1170,9 +1171,13 @@ function ptcgdm_render_builder(array $config = []){
         if(!keyBase) return;
         const cardId = card.id;
         if(!cardId) return;
-        const variants = normaliseNumberVariants(card.number);
-        if(!variants.length) return;
+        const variants = new Set(normaliseNumberVariants(card.number));
+        if(DATASET_KEY === 'one_piece'){
+          normaliseNumberVariants(card.displayNumber).forEach(variant => variants.add(variant));
+        }
+        if(!variants.size) return;
         variants.forEach(variant => {
+          if(!variant) return;
           const key = `${keyBase}|${variant}`;
           if(!setNumberIndex.has(key)){
             setNumberIndex.set(key, cardId);
@@ -1184,12 +1189,22 @@ function ptcgdm_render_builder(array $config = []){
         if(!setId || !card?.id) return;
         const keyBase = makeSetKey(setId);
         if(!keyBase) return;
+        const allNames = new Set();
         const nameKey = makeNameKey(card.name);
-        if(!nameKey) return;
-        const key = `${keyBase}|${nameKey}`;
-        if(!setNameIndex.has(key)){
-          setNameIndex.set(key, card.id);
+        if(nameKey) allNames.add(nameKey);
+        if(Array.isArray(card.extraNameKeys)){
+          card.extraNameKeys.forEach(extra => {
+            const extraKey = makeNameKey(extra);
+            if(extraKey) allNames.add(extraKey);
+          });
         }
+        allNames.forEach(entry => {
+          if(!entry) return;
+          const key = `${keyBase}|${entry}`;
+          if(!setNameIndex.has(key)){
+            setNameIndex.set(key, card.id);
+          }
+        });
       }
 
       function normaliseNumberVariants(value){
@@ -1198,6 +1213,20 @@ function ptcgdm_render_builder(array $config = []){
         const base = raw.replace(/\s+/g,'').toLowerCase();
         if(!base) return [];
         const variants = new Set([base]);
+        const collapsed = base.replace(/[_-]+/g,'');
+        if(collapsed && collapsed !== base){
+          variants.add(collapsed);
+        }
+        if(DATASET_KEY === 'one_piece'){
+          const altVariant = collapsed.replace(/p1\b/, ONE_PIECE_VARIANT_LABELS.p1.replace(/\s+/g,'').toLowerCase()).replace(/p2\b/, ONE_PIECE_VARIANT_LABELS.p2.replace(/\s+/g,'').toLowerCase());
+          if(altVariant && altVariant !== collapsed){
+            variants.add(altVariant);
+          }
+          const strippedVariant = collapsed.replace(/p[12]\b/, '');
+          if(strippedVariant && strippedVariant !== collapsed){
+            variants.add(strippedVariant);
+          }
+        }
         if(/^\d+$/.test(base)){
           const intVal = parseInt(base, 10);
           if(!Number.isNaN(intVal)) variants.add(String(intVal));
@@ -1226,6 +1255,87 @@ function ptcgdm_render_builder(array $config = []){
       function makeNameKey(name){
         const base = norm(name).replace(/\s+/g, ' ');
         return base;
+      }
+
+      const ONE_PIECE_VARIANT_LABELS = {
+        p1: 'Alt Art',
+        p2: 'Special Art',
+      };
+
+      function detectOnePieceVariantKey(id){
+        if(!id) return '';
+        const lower = String(id).toLowerCase();
+        if(/(?:_|-)p2\b/.test(lower)) return 'p2';
+        if(/(?:_|-)p1\b/.test(lower)) return 'p1';
+        return '';
+      }
+
+      function normaliseOnePieceVariantDisplay(value){
+        if(value === null || value === undefined) return '';
+        let result = String(value);
+        if(!result) return '';
+        result = result.replace(/[_\s-]*p2\b/gi, ` ${ONE_PIECE_VARIANT_LABELS.p2}`);
+        result = result.replace(/[_\s-]*p1\b/gi, ` ${ONE_PIECE_VARIANT_LABELS.p1}`);
+        result = result.replace(/\bp2\b/gi, ONE_PIECE_VARIANT_LABELS.p2);
+        result = result.replace(/\bp1\b/gi, ONE_PIECE_VARIANT_LABELS.p1);
+        result = result.replace(/\s{2,}/g, ' ');
+        result = result.replace(/\s*-\s*/g, ' - ');
+        result = result.replace(/\s*,\s*/g, ', ');
+        return result.trim();
+      }
+
+      function applyDatasetSpecificCardAdjustments(card){
+        if(DATASET_KEY !== 'one_piece' || !card || !card.id) return;
+        const variantKey = detectOnePieceVariantKey(card.id);
+        const variantLabel = variantKey ? ONE_PIECE_VARIANT_LABELS[variantKey] : '';
+        const baseName = typeof card.name === 'string' ? card.name.trim() : '';
+        const replacedName = baseName ? normaliseOnePieceVariantDisplay(baseName) : '';
+        let displayName = baseName;
+        if(replacedName) {
+          displayName = replacedName;
+        }
+        if(displayName && variantLabel && !new RegExp(`\\b${variantLabel}\\b`, 'i').test(displayName)){
+          displayName = `${displayName} ${variantLabel}`.replace(/\s+/g, ' ').trim();
+        }
+        if(displayName && displayName !== baseName){
+          card.displayName = displayName;
+        }
+        const extraNames = new Set(Array.isArray(card.extraNameKeys) ? card.extraNameKeys : []);
+        if(replacedName && replacedName !== baseName) extraNames.add(replacedName);
+        if(displayName && displayName !== baseName) extraNames.add(displayName);
+        if(extraNames.size){
+          card.extraNameKeys = Array.from(extraNames);
+        }
+        const originalNumber = typeof card.number === 'string' && card.number ? card.number : '';
+        const derivedNumberSource = originalNumber || (card.code ? String(card.code) : '');
+        const displayNumber = normaliseOnePieceVariantDisplay(derivedNumberSource);
+        if(displayNumber && displayNumber !== originalNumber){
+          card.displayNumber = displayNumber;
+        }
+      }
+
+      function getCardDisplayName(card){
+        if(!card) return '';
+        const display = typeof card.displayName === 'string' ? card.displayName.trim() : '';
+        if(display) return display;
+        const base = typeof card.name === 'string' ? card.name.trim() : '';
+        return base;
+      }
+
+      function getCardDisplayNumber(card){
+        if(!card) return '';
+        const display = typeof card.displayNumber === 'string' ? card.displayNumber.trim() : '';
+        if(display) return display;
+        if(card.number !== undefined && card.number !== null){
+          return String(card.number).trim();
+        }
+        return '';
+      }
+
+      function getCardSearchName(card){
+        const display = getCardDisplayName(card);
+        if(display) return norm(display);
+        return norm(card?.name || '');
       }
 
       function registerSetMeta(meta){
@@ -1289,20 +1399,21 @@ function ptcgdm_render_builder(array $config = []){
         if(!setId || !sup){ els.filterCount.textContent='Pick set & supertype.'; els.results.innerHTML=''; els.btnAdd.disabled=true; return; }
         const supKey=norm(sup);
         const base=[]; for(const c of byId.values()){ if(c?.set?.id===setId && norm(c?.supertype)===supKey) base.push(c); }
-        const list=q? base.filter(c=>norm(c.name).includes(q)) : base;
+        const list=q? base.filter(c=>getCardSearchName(c).includes(q)) : base;
         list.sort((a,b)=> numKey(a)-numKey(b) || String(a.number||'').localeCompare(String(b.number||''), undefined, {numeric:true, sensitivity:'base'}));
         const MAX=200, shown=list.slice(0,MAX);
         els.filterCount.textContent=`${list.length} cards`+(list.length>MAX?` (showing ${MAX})`:'');
         const resultHTML = shown.map(c=>{
-          const number = String(c.number||'').trim();
+          const number = getCardDisplayNumber(c);
           const setLabel = getCardSetLabel(c);
           const metaParts = [];
           if(number) metaParts.push(`#${number}`);
           if(setLabel) metaParts.push(setLabel);
           const meta = metaParts.map(part=>esc(part)).join(' • ');
+          const displayName = getCardDisplayName(c) || c?.name || c?.id || '';
           return `
           <div class="result">
-            <div><div class="name">${esc(c.name)}</div><div class="muted">${meta}</div></div>
+            <div><div class="name">${esc(displayName)}</div><div class="muted">${meta}</div></div>
             <div><span class="chip">${esc(c.supertype||'')}</span></div>
             <div><button class="btn secondary" data-id="${esc(c.id)}">Add</button></div>
           </div>`;
@@ -1316,7 +1427,7 @@ function ptcgdm_render_builder(array $config = []){
       function addFirstMatch(){
         const setId=els.selSet.value, sup=norm(els.selSupertype.value), q=norm(els.nameInput.value);
         const base=[]; for(const c of byId.values()){ if(c?.set?.id===setId && norm(c?.supertype)===sup) base.push(c); }
-        const list=q? base.filter(c=>norm(c.name).includes(q)) : base;
+        const list=q? base.filter(c=>getCardSearchName(c).includes(q)) : base;
         if(list.length===1) addCard(list[0].id);
         else if(list.length===0) alert('No match.');
         else alert('Multiple matches — click Add on the exact row.');
@@ -1374,15 +1485,15 @@ function ptcgdm_render_builder(array $config = []){
             errors.push(`Line ${idx+1}: Unable to add card.`);
             return;
           }
-          if(delta === 0){
-            const maxLabel = parsed.searchByName ? (card?.name || parsed.resolvedName || parsed.name || parsed.setCodeDisplay) : `${parsed.setCodeDisplay} ${parsed.numberDisplay}`;
-            errors.push(`Line ${idx+1}: ${maxLabel} already at maximum quantity.`);
-            return;
-          }
-          totalAdded += delta;
-          const cardName = card?.name || parsed.resolvedName || parsed.name || `${parsed.setCodeDisplay} ${parsed.numberDisplay}`;
-          const numberDisplay = card?.number ? String(card.number).toUpperCase() : (parsed.searchByName ? '' : parsed.numberDisplay);
-          successes.push({qty: delta, name: cardName, code: parsed.setCodeDisplay, number: numberDisplay});
+            if(delta === 0){
+              const maxLabel = parsed.searchByName ? (getCardDisplayName(card) || parsed.resolvedName || parsed.name || parsed.setCodeDisplay) : `${parsed.setCodeDisplay} ${parsed.numberDisplay}`;
+              errors.push(`Line ${idx+1}: ${maxLabel} already at maximum quantity.`);
+              return;
+            }
+            totalAdded += delta;
+            const cardName = getCardDisplayName(card) || parsed.resolvedName || parsed.name || `${parsed.setCodeDisplay} ${parsed.numberDisplay}`;
+            const numberDisplay = getCardDisplayNumber(card) || (parsed.searchByName ? '' : parsed.numberDisplay);
+            successes.push({qty: delta, name: cardName, code: parsed.setCodeDisplay, number: numberDisplay});
         });
         if(totalAdded > 0){
           renderDeckTable();
@@ -1557,9 +1668,9 @@ function ptcgdm_render_builder(array $config = []){
         if(!targets.length) return '';
         let bestId='';
         let bestScore=Infinity;
-        for(const card of byId.values()){
-          if(!card || card?.set?.id !== setId) continue;
-          const cardNorm = normaliseSimilarityName(card?.name);
+          for(const card of byId.values()){
+            if(!card || card?.set?.id !== setId) continue;
+            const cardNorm = normaliseSimilarityName(getCardDisplayName(card) || card?.name);
           if(!cardNorm) continue;
           for(const target of targets){
             const score = computeNameSimilarityScore(cardNorm, target.norm);
@@ -1668,31 +1779,33 @@ function ptcgdm_render_builder(array $config = []){
           return;
         }
 
-        const metaList = inventoryData.map(entry=>{
-          if(!entry || !entry.id) return null;
-          const entryId = String(entry.id);
-          const card = byId.get(entry.id);
-          const name = (card?.name || entry.name || entryId || '').trim();
-          const setName = getCardSetLabel(card);
-          const number = card?.number ? String(card.number).toUpperCase() : '';
-          const supertype = card?.supertype || entry.supertype || '';
-          const setId = card?.set?.id ? String(card.set.id).toLowerCase() : '';
-          const setNameKey = setName.toLowerCase();
-          const setSortKey = setId || setNameKey;
-          return {
-            entry,
-            entryId,
-            card,
-            name,
-            nameKey: name.toLowerCase(),
-            setName,
-            setNameKey,
-            setSortKey,
-            number,
-            numberKey: number.toUpperCase(),
-            supertype,
-          };
-        }).filter(Boolean);
+          const metaList = inventoryData.map(entry=>{
+            if(!entry || !entry.id) return null;
+            const entryId = String(entry.id);
+            const card = byId.get(entry.id);
+            const displayName = (getCardDisplayName(card) || entry.name || entryId || '').trim();
+            const setName = getCardSetLabel(card);
+            const numberDisplay = getCardDisplayNumber(card);
+            const supertype = card?.supertype || entry.supertype || '';
+            const setId = card?.set?.id ? String(card.set.id).toLowerCase() : '';
+            const setNameKey = setName.toLowerCase();
+            const setSortKey = setId || setNameKey;
+            const numberSortSource = card?.number ? String(card.number) : numberDisplay;
+            const numberKey = String(numberSortSource || '').toUpperCase();
+            return {
+              entry,
+              entryId,
+              card,
+              name: displayName,
+              nameKey: displayName.toLowerCase(),
+              setName,
+              setNameKey,
+              setSortKey,
+              number: numberDisplay,
+              numberKey,
+              supertype,
+            };
+          }).filter(Boolean);
 
         if(!metaList.length){
           els.inventoryBody.innerHTML = emptyRow;
@@ -2095,8 +2208,9 @@ function ptcgdm_render_builder(array $config = []){
         deck.forEach((d,i)=>{
           const c=byId.get(d.id);
           const setName=getCardSetLabel(c);
-          const num=c?.number||'';
+          const numberDisplay=getCardDisplayNumber(c);
           const sup=c?.supertype||'';
+          const displayName=getCardDisplayName(c) || d.id;
           if(IS_INVENTORY){
             const entryTotal = sumInventoryVariantQuantities(d);
             total += entryTotal;
@@ -2109,11 +2223,11 @@ function ptcgdm_render_builder(array $config = []){
               variantCells.push(`<td><input class="variantQtyInput" data-variant="${key}" type="number" min="${INVENTORY_BUFFER_MIN}" max="${INVENTORY_BUFFER_MAX}" value="${qtyValue}" placeholder="${label}"></td>`);
               variantCells.push(`<td><input class="variantPriceInput" data-variant="${key}" type="number" step="0.01" min="0" value="${priceValue}" placeholder="${label}"></td>`);
             });
-            rows.push(`<tr data-id="${d.id}"><td>${i+1}</td><td>${esc(c?.name||d.id)}</td><td>${esc(setName)}</td><td>${esc(String(num))}</td><td>${esc(sup)}</td>${variantCells.join('')}<td><button class="btn secondary" data-act="remove">Remove</button></td></tr>`);
+            rows.push(`<tr data-id="${d.id}"><td>${i+1}</td><td>${esc(displayName)}</td><td>${esc(setName)}</td><td>${esc(String(numberDisplay || ''))}</td><td>${esc(sup)}</td>${variantCells.join('')}<td><button class="btn secondary" data-act="remove">Remove</button></td></tr>`);
           }else{
             total += d.qty;
             const qtyInputAttrs = 'min="1" max="60"';
-            rows.push(`<tr data-id="${d.id}"><td>${i+1}</td><td>${esc(c?.name||d.id)}</td><td>${esc(setName)}</td><td>${esc(String(num))}</td><td>${esc(sup)}</td>
+            rows.push(`<tr data-id="${d.id}"><td>${i+1}</td><td>${esc(displayName)}</td><td>${esc(setName)}</td><td>${esc(String(numberDisplay || ''))}</td><td>${esc(sup)}</td>
             <td><div class="qtybox"><button class="btn secondary" data-act="minus">–</button><input class="qtyInput" type="number" value="${d.qty}" ${qtyInputAttrs}><button class="btn secondary" data-act="plus">+</button></div></td>
             <td><button class="btn secondary" data-act="remove">Remove</button></td></tr>`);
           }
