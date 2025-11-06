@@ -462,6 +462,7 @@ function ptcgdm_render_builder(array $config = []){
     'setIndexPaths'       => $set_index_paths,
     'defaultFormat'       => $default_format,
     'datasetKey'          => $dataset_key,
+    'datasetLabel'        => isset($config['label']) ? (string) $config['label'] : '',
     'supertypeOptions'    => array_values(array_map('strval', $supertype_options)),
   ], JSON_UNESCAPED_UNICODE);
   if (!is_string($script_config)) {
@@ -721,6 +722,7 @@ function ptcgdm_render_builder(array $config = []){
         : null;
 
       const DATASET_KEY = typeof SAVE_CONFIG.datasetKey === 'string' ? SAVE_CONFIG.datasetKey : 'pokemon';
+      const DATASET_LABEL = typeof SAVE_CONFIG.datasetLabel === 'string' ? SAVE_CONFIG.datasetLabel.trim() : '';
       const IS_ONE_PIECE = DATASET_KEY === 'one_piece';
       const RAW_SET_LABELS = (SAVE_CONFIG.setLabels && typeof SAVE_CONFIG.setLabels === 'object' && !Array.isArray(SAVE_CONFIG.setLabels)) ? SAVE_CONFIG.setLabels : {};
       const SET_LABELS = {};
@@ -1950,17 +1952,24 @@ function ptcgdm_render_builder(array $config = []){
       function clearDeck(){ deck.length=0; deckMap.clear(); renderDeckTable(); updateJSON(); }
       function renderInventoryDataTable(){
         if(!IS_INVENTORY || !els.inventoryBody) return;
-        const emptyRow = `<tr><td colspan="${INVENTORY_SAVED_EMPTY_COLSPAN}" class="muted">No inventory saved yet.</td></tr>`;
+        const defaultEmptyMessage = 'No inventory saved yet.';
+        const datasetEmptyMessage = DATASET_LABEL
+          ? `No ${DATASET_LABEL} cards saved in inventory.`
+          : 'No matching cards saved in inventory.';
+        const makeEmptyRow = (message)=>`<tr><td colspan="${INVENTORY_SAVED_EMPTY_COLSPAN}" class="muted">${esc(message)}</td></tr>`;
         if(!inventoryData.length){
-          els.inventoryBody.innerHTML = emptyRow;
+          els.inventoryBody.innerHTML = makeEmptyRow(defaultEmptyMessage);
           if(els.inventoryTotals) els.inventoryTotals.textContent = '0 cards';
           return;
         }
 
-          const metaList = inventoryData.map(entry=>{
+        const metaList = inventoryData.map(entry=>{
             if(!entry || !entry.id) return null;
             const entryId = String(entry.id);
             const card = byId.get(entry.id);
+            if(!card){
+              return null;
+            }
             const displayName = (getCardDisplayName(card) || entry.name || entryId || '').trim();
             const setName = getCardSetLabel(card);
             const numberDisplay = getCardDisplayNumber(card);
@@ -1986,7 +1995,8 @@ function ptcgdm_render_builder(array $config = []){
           }).filter(Boolean);
 
         if(!metaList.length){
-          els.inventoryBody.innerHTML = emptyRow;
+          const message = inventoryData.length ? datasetEmptyMessage : defaultEmptyMessage;
+          els.inventoryBody.innerHTML = makeEmptyRow(message);
           if(els.inventoryTotals) els.inventoryTotals.textContent = '0 cards';
           return;
         }
