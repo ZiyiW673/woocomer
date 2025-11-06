@@ -467,6 +467,69 @@ function ptcgdm_render_builder(array $config = []){
   if (!is_string($script_config)) {
     $script_config = '{}';
   }
+
+  $inventory_variant_columns = [];
+  if ($dataset_key === 'one_piece') {
+    $inventory_variant_columns[] = [
+      'key'          => 'normal',
+      'label'        => 'Normal',
+      'qty_header'   => 'Qty',
+      'price_header' => 'Price',
+    ];
+  } else {
+    $inventory_variant_columns[] = [
+      'key'          => 'normal',
+      'label'        => 'Normal',
+      'qty_header'   => 'Qty (Normal)',
+      'price_header' => 'Price (Normal)',
+    ];
+    $inventory_variant_columns[] = [
+      'key'          => 'foil',
+      'label'        => 'Foil',
+      'qty_header'   => 'Qty (Foil)',
+      'price_header' => 'Price (Foil)',
+    ];
+    $inventory_variant_columns[] = [
+      'key'          => 'reverseFoil',
+      'label'        => 'Reverse Foil',
+      'qty_header'   => 'Qty (Reverse Foil)',
+      'price_header' => 'Price (Reverse Foil)',
+    ];
+    $inventory_variant_columns[] = [
+      'key'          => 'stamped',
+      'label'        => 'Stamped',
+      'qty_header'   => 'Qty (Stamped)',
+      'price_header' => 'Price (Stamped)',
+    ];
+  }
+
+  $inventory_variant_count = count($inventory_variant_columns);
+  if ($inventory_variant_count === 0) {
+    $inventory_variant_columns[] = [
+      'key'          => 'normal',
+      'label'        => 'Normal',
+      'qty_header'   => 'Qty (Normal)',
+      'price_header' => 'Price (Normal)',
+    ];
+    $inventory_variant_count = 1;
+  }
+
+  $inventory_variant_config = [];
+  foreach ($inventory_variant_columns as $variant_column) {
+    $inventory_variant_config[] = [
+      'key'         => (string) ($variant_column['key'] ?? ''),
+      'label'       => (string) ($variant_column['label'] ?? ''),
+      'qtyHeader'   => (string) ($variant_column['qty_header'] ?? ''),
+      'priceHeader' => (string) ($variant_column['price_header'] ?? ''),
+    ];
+  }
+
+  $inventory_variant_json = wp_json_encode($inventory_variant_config, JSON_UNESCAPED_UNICODE);
+  if (!is_string($inventory_variant_json)) {
+    $inventory_variant_json = '[]';
+  }
+
+  $deck_empty_colspan = 5 + $inventory_variant_count * 2 + 1;
 ?>
   <div class="wrap">
     <h1><?php echo esc_html($page_title); ?></h1>
@@ -557,7 +620,27 @@ function ptcgdm_render_builder(array $config = []){
 
       <h3 style="margin:16px 0 8px"><?php echo esc_html($section_heading); ?></h3>
       <div style="overflow:auto">
-        <table id="deckTable"><thead><tr><th>#</th><th>Name</th><th>Set</th><th>No.</th><th>Supertype</th><th>Qty (Normal)</th><th>Price (Normal)</th><th>Qty (Foil)</th><th>Price (Foil)</th><th>Qty (Reverse Foil)</th><th>Price (Reverse Foil)</th><th>Qty (Stamped)</th><th>Price (Stamped)</th><th>Actions</th></tr></thead><tbody id="deckBody"><tr><td colspan="14" class="muted">No cards yet.</td></tr></tbody></table>
+        <table id="deckTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>Set</th>
+              <th>No.</th>
+              <th>Supertype</th>
+              <?php foreach ($inventory_variant_columns as $variant_column) : ?>
+                <th><?php echo esc_html($variant_column['qty_header']); ?></th>
+                <th><?php echo esc_html($variant_column['price_header']); ?></th>
+              <?php endforeach; ?>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="deckBody">
+            <tr>
+              <td colspan="<?php echo esc_attr($deck_empty_colspan); ?>" class="muted">No cards yet.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="row" style="margin-top:12px;align-items:center;justify-content:space-between">
@@ -578,7 +661,27 @@ function ptcgdm_render_builder(array $config = []){
         </div>
       </div>
       <div style="overflow:auto">
-        <table id="inventoryDataTable"><thead><tr><th>#</th><th>Name</th><th>Set</th><th>No.</th><th>Supertype</th><th>Qty (Normal)</th><th>Price (Normal)</th><th>Qty (Foil)</th><th>Price (Foil)</th><th>Qty (Reverse Foil)</th><th>Price (Reverse Foil)</th><th>Qty (Stamped)</th><th>Price (Stamped)</th><th>Actions</th></tr></thead><tbody id="inventoryDataBody"><tr><td colspan="14" class="muted">No inventory saved yet.</td></tr></tbody></table>
+        <table id="inventoryDataTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>Set</th>
+              <th>No.</th>
+              <th>Supertype</th>
+              <?php foreach ($inventory_variant_columns as $variant_column) : ?>
+                <th><?php echo esc_html($variant_column['qty_header']); ?></th>
+                <th><?php echo esc_html($variant_column['price_header']); ?></th>
+              <?php endforeach; ?>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="inventoryDataBody">
+            <tr>
+              <td colspan="<?php echo esc_attr($deck_empty_colspan); ?>" class="muted">No inventory saved yet.</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="row" style="margin-top:12px;align-items:center;justify-content:flex-end">
@@ -611,12 +714,7 @@ function ptcgdm_render_builder(array $config = []){
       const IS_INVENTORY = true;
       const INVENTORY_BUFFER_MIN = -999;
       const INVENTORY_BUFFER_MAX = 999;
-      const INVENTORY_VARIANTS = [
-        { key: 'normal', label: 'Normal' },
-        { key: 'foil', label: 'Foil' },
-        { key: 'reverseFoil', label: 'Reverse Foil' },
-        { key: 'stamped', label: 'Stamped' },
-      ];
+      const INVENTORY_VARIANTS = <?php echo $inventory_variant_json; ?>;
       const INVENTORY_SAVED_EMPTY_COLSPAN = 5 + INVENTORY_VARIANTS.length * 2 + 1;
       const INVENTORY_NUMERIC_COLLATOR = (typeof Intl !== 'undefined' && typeof Intl.Collator === 'function')
         ? new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
