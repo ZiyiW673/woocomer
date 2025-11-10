@@ -4708,8 +4708,11 @@ function ptcgdm_sync_inventory_product_variations($product, array $active_varian
     return null;
   }
 
-  $attribute_name = 'Type';
-  $attribute_slug = sanitize_title($attribute_name);
+  $attribute_label = 'Type';
+  $attribute_slug = sanitize_title($attribute_label);
+  if ($attribute_slug === '') {
+    $attribute_slug = 'type';
+  }
   $variation_attribute_key = function_exists('wc_variation_attribute_name')
     ? wc_variation_attribute_name($attribute_slug)
     : 'attribute_' . $attribute_slug;
@@ -4727,16 +4730,16 @@ function ptcgdm_sync_inventory_product_variations($product, array $active_varian
   if (class_exists('WC_Product_Attribute')) {
     $attribute = new WC_Product_Attribute();
     $attribute->set_id(0);
-    $attribute->set_name($attribute_name);
+    $attribute->set_name($attribute_slug);
     $attribute->set_options($options);
     $attribute->set_position(0);
     $attribute->set_visible(true);
     $attribute->set_variation(true);
-    $product->set_attributes([$attribute]);
+    $product->set_attributes([$attribute_slug => $attribute]);
   } else {
     $product->set_attributes([
-      $attribute_name => [
-        'name'         => $attribute_name,
+      $attribute_slug => [
+        'name'         => $attribute_slug,
         'value'        => implode(' | ', $options),
         'position'     => 0,
         'is_visible'   => 1,
@@ -4748,9 +4751,8 @@ function ptcgdm_sync_inventory_product_variations($product, array $active_varian
 
   if (method_exists($product, 'set_default_attributes')) {
     $product->set_default_attributes($default_attributes);
-  } else {
-    $product->update_meta_data('_default_attributes', $default_attributes);
   }
+  $product->update_meta_data('_default_attributes', $default_attributes);
 
   $existing_children = [];
   $existing_ids = [];
