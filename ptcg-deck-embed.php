@@ -4710,7 +4710,7 @@ function ptcgdm_sync_inventory_product_variations($product, array $active_varian
     return null;
   }
 
-  $attribute_name = 'Finish';
+  $attribute_name = 'Type';
   $attribute_slug = sanitize_title($attribute_name);
   $options = [];
   foreach ($active_variants as $key => $data) {
@@ -5302,7 +5302,7 @@ function ptcgdm_zero_unlisted_inventory_products(array $active_skus) {
 
           $variant_key = trim((string) $variation->get_meta('_ptcgdm_variant_key'));
           if ($variant_key === '' && method_exists($variation, 'get_attribute')) {
-            $finish = $variation->get_attribute('finish');
+            $finish = $variation->get_attribute('type');
             if ($finish !== '') {
               $variant_key = ptcgdm_inventory_variant_key_from_label($finish);
             }
@@ -5697,7 +5697,7 @@ function ptcgdm_handle_inventory_stock_change($product) {
     }
 
     $children = method_exists($parent_product, 'get_children') ? $parent_product->get_children() : [];
-    $attribute_slug = function_exists('sanitize_title') ? sanitize_title('Finish') : 'finish';
+    $attribute_slug = function_exists('sanitize_title') ? sanitize_title('Type') : 'type';
 
     foreach ($children as $child_id) {
       $child_id = (int) $child_id;
