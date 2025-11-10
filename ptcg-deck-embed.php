@@ -4385,6 +4385,253 @@ function ptcgdm_output_managed_product_image_styles() {
 
 add_action('wp_head', 'ptcgdm_output_managed_product_image_styles');
 
+function ptcgdm_output_variant_console_logger() {
+  $doing_ajax = function_exists('wp_doing_ajax') ? wp_doing_ajax() : (defined('DOING_AJAX') && DOING_AJAX);
+  if (is_admin() && !$doing_ajax) {
+    return;
+  }
+
+  global $product;
+  if (!($product instanceof WC_Product) && function_exists('wc_get_product')) {
+    $product = wc_get_product(get_the_ID());
+  }
+
+  if (!($product instanceof WC_Product)) {
+    return;
+  }
+
+  if (!ptcgdm_is_managed_product($product)) {
+    return;
+  }
+
+  if (!method_exists($product, 'is_type') || !$product->is_type('variable')) {
+    return;
+  }
+
+  static $ptcgdm_variant_logger_printed = false;
+  if ($ptcgdm_variant_logger_printed) {
+    return;
+  }
+
+  $ptcgdm_variant_logger_printed = true;
+
+  ob_start();
+  ?>
+  <script id="ptcgdm-variant-console-logger">
+  (function(){
+    var existing = window.ptcgdmVariantLogger;
+    if (existing && typeof existing.logExisting === 'function') {
+      existing.logExisting();
+      return;
+    }
+
+    function matchesSelector(el, selector) {
+      if (!el || el.nodeType !== 1) {
+        return false;
+      }
+      var fn = el.matches || el.matchesSelector || el.msMatchesSelector || el.webkitMatchesSelector || el.mozMatchesSelector;
+      if (fn) {
+        return !!fn.call(el, selector);
+      }
+      if (selector === 'form.variations_form') {
+        var tag = el.tagName || el.nodeName || '';
+        if (!tag || String(tag).toLowerCase() !== 'form') {
+          return false;
+        }
+        var className = typeof el.className === 'string' ? el.className : '';
+        if (!className) {
+          return false;
+        }
+        return (' ' + className + ' ').indexOf(' variations_form ') !== -1;
+      }
+
+      return false;
+    }
+
+    function isArrayLike(value) {
+      if (Array.isArray) {
+        return Array.isArray(value);
+      }
+
+      return Object.prototype.toString.call(value) === '[object Array]';
+    }
+
+    function parseVariations(form) {
+      var data = null;
+      var dataset = form && form.dataset ? form.dataset : {};
+      var productId = dataset.productId || dataset.product_id || '';
+
+      if (window.jQuery) {
+        try {
+          var $form = window.jQuery(form);
+          if (typeof $form.data === 'function') {
+            var stored = $form.data('product_variations');
+            if (stored !== undefined) {
+              data = stored;
+            }
+            if (!productId) {
+              var idData = $form.data('product_id');
+              if (idData) {
+                productId = idData;
+              }
+            }
+          }
+        } catch (err) {}
+      }
+
+      if (!data) {
+        var raw = dataset.productVariations || dataset.product_variations || form.getAttribute('data-product_variations');
+        if (typeof raw === 'string' && raw !== '') {
+          try {
+            data = JSON.parse(raw);
+          } catch (err) {}
+        } else if (raw && typeof raw === 'object') {
+          data = raw;
+        }
+      }
+
+      if (!productId) {
+        var hiddenId = form.querySelector ? form.querySelector('input[name="product_id"]') : null;
+        if (hiddenId && hiddenId.value) {
+          productId = hiddenId.value;
+        }
+      }
+
+      return { data: data, productId: productId };
+    }
+
+    function markLogged(form) {
+      if (form && form.removeAttribute) {
+        form.removeAttribute('data-ptcgdm-variant-log-attempts');
+      }
+      if (form && form.setAttribute) {
+        form.setAttribute('data-ptcgdm-variant-logged', '1');
+      }
+    }
+
+    function logContext(parsed, fallback) {
+      var context = {
+        productId: parsed.productId || null,
+        variationCount: isArrayLike(parsed.data) ? parsed.data.length : null,
+        variations: parsed.data
+      };
+      try {
+        if (fallback) {
+          console.warn('PTCGDM variant info unavailable', context);
+        } else {
+          console.log('PTCGDM variant info', context);
+        }
+      } catch (err) {}
+    }
+
+    function logForm(form) {
+      if (!form || form.nodeType !== 1) {
+        return;
+      }
+      if (form.getAttribute && form.getAttribute('data-ptcgdm-variant-logged') === '1') {
+        return;
+      }
+      if (!matchesSelector(form, 'form.variations_form')) {
+        return;
+      }
+
+      var parsed = parseVariations(form);
+      var data = parsed.data;
+      var emptyArray = isArrayLike(data) && data.length === 0;
+      if (!data || emptyArray) {
+        var attempts = parseInt(form.getAttribute('data-ptcgdm-variant-log-attempts') || '0', 10);
+        if (attempts >= 5) {
+          markLogged(form);
+          parsed.data = data || null;
+          logContext(parsed, true);
+          return;
+        }
+        if (form.setAttribute) {
+          form.setAttribute('data-ptcgdm-variant-log-attempts', String(attempts + 1));
+        }
+        if (typeof setTimeout === 'function') {
+          setTimeout(function () { logForm(form); }, 150 * (attempts + 1));
+        }
+        return;
+      }
+
+      markLogged(form);
+      logContext(parsed, false);
+    }
+
+    function logExisting() {
+      var forms = document.querySelectorAll ? document.querySelectorAll('form.variations_form') : [];
+      for (var i = 0; i < forms.length; i++) {
+        logForm(forms[i]);
+      }
+    }
+
+    function observe() {
+      if (typeof MutationObserver === 'undefined') {
+        return;
+      }
+      var observer = new MutationObserver(function (mutations) {
+        for (var i = 0; i < mutations.length; i++) {
+          var nodes = mutations[i].addedNodes;
+          if (!nodes) {
+            continue;
+          }
+          for (var j = 0; j < nodes.length; j++) {
+            var node = nodes[j];
+            if (!node || node.nodeType !== 1) {
+              continue;
+            }
+            if (matchesSelector(node, 'form.variations_form')) {
+              logForm(node);
+              continue;
+            }
+            if (node.querySelectorAll) {
+              var nested = node.querySelectorAll('form.variations_form');
+              for (var k = 0; k < nested.length; k++) {
+                logForm(nested[k]);
+              }
+            }
+          }
+        }
+      });
+      observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    }
+
+    function bindEvents() {
+      if (window.jQuery && window.jQuery(document.body).on) {
+        window.jQuery(document.body).on('wc_variation_form', function (evt, $form) {
+          if ($form && $form.length) {
+            logForm($form[0]);
+          }
+        });
+      }
+    }
+
+    function bootstrap() {
+      logExisting();
+      observe();
+      bindEvents();
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', bootstrap);
+    } else {
+      bootstrap();
+    }
+
+    window.ptcgdmVariantLogger = {
+      logExisting: logExisting,
+      logForm: logForm
+    };
+  })();
+  </script>
+  <?php
+
+  echo (string) ob_get_clean();
+}
+
+add_action('woocommerce_after_single_product_summary', 'ptcgdm_output_variant_console_logger', 99);
+
 function ptcgdm_is_inventory_syncing() {
   return !empty($GLOBALS['ptcgdm_inventory_sync_lock']);
 }
