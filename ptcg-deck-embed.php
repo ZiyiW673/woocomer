@@ -4632,6 +4632,27 @@ function ptcgdm_output_variant_console_logger() {
 
 add_action('woocommerce_after_single_product_summary', 'ptcgdm_output_variant_console_logger', 99);
 
+function ptcgdm_filter_variation_option_name($term, $attribute = '', $product = null) {
+  $term = is_string($term) ? trim($term) : '';
+  if ($term === '') {
+    return $term;
+  }
+
+  $labels = ptcgdm_get_inventory_variant_labels();
+  if (isset($labels[$term])) {
+    return $labels[$term];
+  }
+
+  $resolved = ptcgdm_inventory_variant_key_from_label($term);
+  if ($resolved !== '' && isset($labels[$resolved])) {
+    return $labels[$resolved];
+  }
+
+  return $term;
+}
+
+add_filter('woocommerce_variation_option_name', 'ptcgdm_filter_variation_option_name', 10, 3);
+
 function ptcgdm_is_inventory_syncing() {
   return !empty($GLOBALS['ptcgdm_inventory_sync_lock']);
 }
@@ -4963,11 +4984,43 @@ function ptcgdm_sync_inventory_product_variations($product, array $active_varian
   $variation_attribute_key = function_exists('wc_variation_attribute_name')
     ? wc_variation_attribute_name($attribute_slug)
     : 'attribute_' . $attribute_slug;
-  $options = [];
+  $variant_labels = ptcgdm_get_inventory_variant_labels();
+  $normalized_variants = [];
+
   foreach ($active_variants as $key => $data) {
-    $options[] = ptcgdm_inventory_variant_label($key);
+    $normalized_key = is_string($key) ? trim($key) : '';
+    if ($normalized_key === '') {
+      continue;
+    }
+
+    if (!isset($variant_labels[$normalized_key])) {
+      $converted = ptcgdm_inventory_variant_key_from_label($normalized_key);
+      if ($converted !== '' && isset($variant_labels[$converted])) {
+        $normalized_key = $converted;
+      }
+    }
+
+    if (!isset($variant_labels[$normalized_key])) {
+      continue;
+    }
+
+    $normalized_variants[$normalized_key] = $data;
   }
-  $options = array_values(array_unique(array_filter($options, 'strlen')));
+
+  $options = [];
+  foreach ($variant_labels as $variant_key => $_) {
+    if (array_key_exists($variant_key, $normalized_variants)) {
+      $options[] = $variant_key;
+    }
+  }
+
+  foreach ($normalized_variants as $variant_key => $_) {
+    if (!in_array($variant_key, $options, true)) {
+      $options[] = $variant_key;
+    }
+  }
+
+  $active_variants = $normalized_variants;
 
   $default_attributes = [];
   if (!empty($options)) {
@@ -5029,7 +5082,12 @@ function ptcgdm_sync_inventory_product_variations($product, array $active_varian
   $used_ids = [];
   $min_price = null;
 
-  foreach ($active_variants as $key => $data) {
+  foreach ($options as $variant_key) {
+    if (!isset($active_variants[$variant_key])) {
+      continue;
+    }
+
+    $data = $active_variants[$variant_key];
     $qty = ptcgdm_normalize_inventory_quantity($data['qty'] ?? 0);
     if ($qty < 0) {
       $qty = 0;
@@ -5039,20 +5097,19 @@ function ptcgdm_sync_inventory_product_variations($product, array $active_varian
       $price = ptcgdm_normalize_inventory_price($data['price']);
     }
 
-    if (isset($existing_children[$key])) {
-      $variation = $existing_children[$key];
+    if (isset($existing_children[$variant_key])) {
+      $variation = $existing_children[$variant_key];
     } else {
       $variation = new WC_Product_Variation();
       $variation->set_parent_id($product_id);
       $variation->set_status('publish');
     }
 
-    $label = ptcgdm_inventory_variant_label($key);
-    $attributes = [$variation_attribute_key => $label];
+    $attributes = [$variation_attribute_key => $variant_key];
     if (method_exists($variation, 'set_attributes')) {
       $variation->set_attributes($attributes);
     }
-    $variation->update_meta_data('_ptcgdm_variant_key', $key);
+    $variation->update_meta_data('_ptcgdm_variant_key', $variant_key);
     if (method_exists($variation, 'set_manage_stock')) {
       $variation->set_manage_stock(true);
     }
@@ -5074,9 +5131,9 @@ function ptcgdm_sync_inventory_product_variations($product, array $active_varian
       $variation->set_price('');
     }
 
-    $sku_suffix = strtoupper(preg_replace('/[^a-z0-9]+/i', '', (string) $key));
+    $sku_suffix = strtoupper(preg_replace('/[^a-z0-9]+/i', '', (string) $variant_key));
     if ($sku_suffix === '') {
-      $sku_suffix = strtoupper(substr((string) $key, 0, 6));
+      $sku_suffix = strtoupper(substr((string) $variant_key, 0, 6));
     }
     $variation->set_sku($sku . '-' . $sku_suffix);
     $variation->save();
