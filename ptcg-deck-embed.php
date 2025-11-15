@@ -1721,7 +1721,7 @@ function ptcgdm_render_builder(array $config = []){
           const setClean = String(setTokenRaw || '').trim();
           const numberClean = String(numberTokenRaw || '').trim();
           const sanitisedSet = setClean.replace(/[^0-9a-zA-Z-]+/g,'');
-          const sanitisedNumber = numberClean.replace(/[^0-9a-zA-Z]+/g,'');
+          const sanitisedNumber = numberClean.replace(/[^0-9a-zA-Z\/+-]+/g,'');
           if(!sanitisedSet) return { error: 'Missing set code.' };
           if(!sanitisedNumber) return { error: 'Missing card number.' };
           const variantQuantities = {};
@@ -1784,7 +1784,7 @@ function ptcgdm_render_builder(array $config = []){
         const setClean = String(setTokenRaw || '').trim();
         const numberClean = String(numberTokenRaw || '').trim();
         const sanitisedSet = setClean.replace(/[^0-9a-zA-Z-]+/g,'');
-        const sanitisedNumber = numberClean.replace(/[^0-9a-zA-Z]+/g,'');
+        const sanitisedNumber = numberClean.replace(/[^0-9a-zA-Z\/+-]+/g,'');
         if(!sanitisedSet) return { error: 'Missing set code.' };
         if(!sanitisedNumber) return { error: 'Missing card number.' };
         return {
