@@ -599,8 +599,8 @@ function ptcgdm_render_builder(array $config = []){
       <?php if ($dataset_key !== 'one_piece') : ?>
       <div style="margin-top:16px">
         <label for="bulkInput">Bulk Add by Code</label>
-        <textarea id="bulkInput" class="bulk-input" rows="8" placeholder="Abra;MEG;054/132;Psychic;34;5;0&#10;Charizard;BS;004/102;Fire;1;0;0" spellcheck="false"></textarea>
-        <p class="description">Enter one card per line using “Name;Set;ID;Type;Normal;Foil;Reverse”. Example: <code>Abra;MEG;054/132;Psychic;34;5;0</code></p>
+        <textarea id="bulkInput" class="bulk-input" rows="8" placeholder="TWM 141/167&#10;MEG 054/132 2 0 0" spellcheck="false"></textarea>
+        <p class="description">Enter one card per line using the set code and card number (e.g., <code>TWM 141/167</code>). Optional variant quantities (Normal, Foil, Reverse, Stamped) can follow.</p>
         <div class="bulk-actions">
           <button id="btnBulkAdd" class="btn secondary" disabled>Add cards</button>
           <button id="btnClearDeck" class="btn danger" disabled><?php echo esc_html($clear_button_label); ?></button>
@@ -1630,7 +1630,7 @@ function ptcgdm_render_builder(array $config = []){
           processed++;
           const parsed = parseBulkLine(trimmed);
           if(!parsed){
-            errors.push(`Line ${idx+1}: Expected “Name;Set;ID;Type;Normal;Foil;Reverse”.`);
+            errors.push(`Line ${idx+1}: Expected “Set code and card number”, e.g., “TWM 141/167”.`);
             return;
           }
           if(parsed.error){
@@ -1669,7 +1669,7 @@ function ptcgdm_render_builder(array $config = []){
           updateJSON();
         }
         if(processed === 0){
-          setBulkStatus('Enter one card per line using “Name;Set;ID;Type;Normal;Foil;Reverse”.', true);
+          setBulkStatus('Enter set code and card number per line, e.g., “TWM 141/167”.', true);
           updateBulkAddState();
           return;
         }
@@ -1695,64 +1695,81 @@ function ptcgdm_render_builder(array $config = []){
         updateBulkAddState();
       }
 
+      function parseInventoryVariantQuantities(quantityTokens){
+        const variantQuantities = {};
+        let totalQty = 0;
+        const maxVariants = INVENTORY_VARIANTS.length;
+        const extraTokens = Array.isArray(quantityTokens) ? quantityTokens.slice(maxVariants) : [];
+        if(extraTokens.some(token => String(token || '').trim() !== '')){
+          return { error: `Too many quantity values. Expected ${maxVariants}.` };
+        }
+        let quantityError = null;
+        INVENTORY_VARIANTS.forEach(({ key, label }, idx)=>{
+          if(quantityError) return;
+          const token = Array.isArray(quantityTokens) ? quantityTokens[idx] : undefined;
+          if(token === undefined || token === null) return;
+          const normalised = String(token).trim();
+          if(normalised === '') return;
+          if(!/^[-+]?\d+(?:\.\d*)?$/.test(normalised)){
+            quantityError = `Invalid quantity for ${label || key}.`;
+            return;
+          }
+          const parsedQty = parseInt(normalised, 10);
+          if(Number.isNaN(parsedQty) || parsedQty < 0){
+            quantityError = `${label || key} quantity must be zero or greater.`;
+            return;
+          }
+          if(parsedQty > 0){
+            variantQuantities[key] = parsedQty;
+            totalQty += parsedQty;
+          }
+        });
+        if(quantityError){
+          return { error: quantityError };
+        }
+        return { variantQuantities, totalQty };
+      }
+
       function parseBulkLine(line){
         if(!line) return null;
         const trimmedLine = line.trim();
         if(!trimmedLine) return null;
         if(IS_INVENTORY){
-          const segments = trimmedLine.split(';');
-          if(segments.length < 4) return { error: 'Expected “Name;Set;ID;Type;Normal;Foil;Reverse”.' };
-          const parts = segments.map(part => part.trim());
-          const [nameRaw, setTokenRaw, numberTokenRaw, typeRaw, ...quantityTokens] = parts;
-          const name = String(nameRaw || '').trim();
-          if(!name) return { error: 'Missing card name.' };
+          const tokens = trimmedLine.includes(';')
+            ? trimmedLine.split(';').map(part => part.trim())
+            : trimmedLine.split(/\s+/).map(part => part.trim()).filter(Boolean);
+          if(tokens.length < 2){
+            return { error: 'Enter the set code followed by the card number, e.g., “TWM 141/167”.' };
+          }
+          const setTokenRaw = tokens.shift();
+          const numberTokenRaw = tokens.shift();
           const setClean = String(setTokenRaw || '').trim();
           const numberClean = String(numberTokenRaw || '').trim();
           const sanitisedSet = setClean.replace(/[^0-9a-zA-Z-]+/g,'');
           const sanitisedNumber = numberClean.replace(/[^0-9a-zA-Z\/+-]+/g,'');
           if(!sanitisedSet) return { error: 'Missing set code.' };
           if(!sanitisedNumber) return { error: 'Missing card number.' };
-          const variantQuantities = {};
-          let totalQty = 0;
-          const maxVariants = INVENTORY_VARIANTS.length;
-          const extraTokens = quantityTokens.slice(maxVariants);
-          if(extraTokens.some(token => String(token || '').trim() !== '')){
-            return { error: `Too many quantity values. Expected ${maxVariants}.` };
+          const quantityTokens = tokens;
+          const quantityResult = parseInventoryVariantQuantities(quantityTokens);
+          if(quantityResult && quantityResult.error){
+            return { error: quantityResult.error };
           }
-          let quantityError = null;
-          INVENTORY_VARIANTS.forEach(({ key, label }, idx)=>{
-            if(quantityError) return;
-            const token = quantityTokens[idx];
-            if(token === undefined || token === null) return;
-            const normalised = String(token).trim();
-            if(normalised === '') return;
-            if(!/^[-+]?\d+(?:\.\d*)?$/.test(normalised)){
-              quantityError = `Invalid quantity for ${label || key}.`;
-              return;
+          let variantQuantities = quantityResult?.variantQuantities || {};
+          let totalQty = quantityResult?.totalQty || 0;
+          if(totalQty === 0){
+            const fallbackVariant = INVENTORY_VARIANTS[0]?.key || 'normal';
+            if(fallbackVariant){
+              variantQuantities = Object.assign({}, variantQuantities, { [fallbackVariant]: 1 });
             }
-            const parsedQty = parseInt(normalised, 10);
-            if(Number.isNaN(parsedQty) || parsedQty < 0){
-              quantityError = `${label || key} quantity must be zero or greater.`;
-              return;
-            }
-            if(parsedQty > 0){
-              variantQuantities[key] = parsedQty;
-              totalQty += parsedQty;
-            }
-          });
-          if(quantityError){
-            return { error: quantityError };
+            totalQty = 1;
           }
-          if(!totalQty) return { error: 'At least one quantity must be greater than zero.' };
           return {
             qty: totalQty,
-            name,
             setCode: sanitisedSet,
             setCodeDisplay: sanitisedSet.toUpperCase(),
             number: sanitisedNumber,
             numberDisplay: sanitisedNumber.toUpperCase(),
             variantQuantities,
-            cardType: String(typeRaw || '').trim(),
           };
         }
         const parts = trimmedLine.split(/\s+/);
