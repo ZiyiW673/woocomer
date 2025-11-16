@@ -1642,21 +1642,10 @@ function ptcgdm_render_builder(array $config = []){
             errors.push(`Line ${idx+1}: Unknown set code “${parsed.setCodeDisplay}”.`);
             return;
           }
-          let cardId = '';
-          let cardLookupError = '';
-          if(parsed.searchByName){
-            cardId = findCardIdBySetAndNames(setId, parsed.searchNames.length ? parsed.searchNames : [parsed.resolvedName]);
-            if(!cardId){
-              cardLookupError = `${parsed.resolvedName || parsed.name} not found in set ${parsed.setCodeDisplay}.`;
-            }
-          } else {
-            cardId = findCardIdBySetAndNumber(setId, parsed.number);
-            if(!cardId){
-              cardLookupError = `Card ${parsed.setCodeDisplay} ${parsed.numberDisplay} not found.`;
-            }
-          }
+          const cardId = findCardIdBySetAndNumber(setId, parsed.number);
           if(!cardId){
-            errors.push(`Line ${idx+1}: ${cardLookupError || 'Card not found.'}`);
+            const cardLookupError = `Card ${parsed.setCodeDisplay} ${parsed.numberDisplay} not found.`;
+            errors.push(`Line ${idx+1}: ${cardLookupError}`);
             return;
           }
           const card = byId.get(cardId);
@@ -1666,13 +1655,13 @@ function ptcgdm_render_builder(array $config = []){
             return;
           }
             if(delta === 0){
-              const maxLabel = parsed.searchByName ? (getCardDisplayName(card) || parsed.resolvedName || parsed.name || parsed.setCodeDisplay) : `${parsed.setCodeDisplay} ${parsed.numberDisplay}`;
+              const maxLabel = `${parsed.setCodeDisplay} ${parsed.numberDisplay}`;
               errors.push(`Line ${idx+1}: ${maxLabel} already at maximum quantity.`);
               return;
             }
             totalAdded += delta;
-            const cardName = getCardDisplayName(card) || parsed.resolvedName || parsed.name || `${parsed.setCodeDisplay} ${parsed.numberDisplay}`;
-            const numberDisplay = getCardDisplayNumber(card) || (parsed.searchByName ? '' : parsed.numberDisplay);
+            const cardName = getCardDisplayName(card) || parsed.name || `${parsed.setCodeDisplay} ${parsed.numberDisplay}`;
+            const numberDisplay = getCardDisplayNumber(card) || parsed.numberDisplay;
             successes.push({qty: delta, name: cardName, code: parsed.setCodeDisplay, number: numberDisplay});
         });
         if(totalAdded > 0){
@@ -1717,7 +1706,6 @@ function ptcgdm_render_builder(array $config = []){
           const [nameRaw, setTokenRaw, numberTokenRaw, typeRaw, ...quantityTokens] = parts;
           const name = String(nameRaw || '').trim();
           if(!name) return { error: 'Missing card name.' };
-          const energyInfo = resolveBasicEnergyInfo(name);
           const setClean = String(setTokenRaw || '').trim();
           const numberClean = String(numberTokenRaw || '').trim();
           const sanitisedSet = setClean.replace(/[^0-9a-zA-Z-]+/g,'');
@@ -1759,13 +1747,10 @@ function ptcgdm_render_builder(array $config = []){
           return {
             qty: totalQty,
             name,
-            resolvedName: energyInfo?.displayName || name,
             setCode: sanitisedSet,
             setCodeDisplay: sanitisedSet.toUpperCase(),
             number: sanitisedNumber,
             numberDisplay: sanitisedNumber.toUpperCase(),
-            searchByName: !!energyInfo,
-            searchNames: energyInfo?.searchNames || [],
             variantQuantities,
             cardType: String(typeRaw || '').trim(),
           };
