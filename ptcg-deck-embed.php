@@ -566,6 +566,7 @@ function ptcgdm_render_builder(array $config = []){
       .bulk-status{font-size:13px}
       .bulk-status.error{color:#f28b82}
       .btn.danger{background:linear-gradient(180deg,#ff4d4f,#d9363e)}
+      .table-scroll{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px;margin:-4px 0 8px;padding:4px}
     </style>
 
     <div class="ptcg" id="ptcg-root">
@@ -620,7 +621,7 @@ function ptcgdm_render_builder(array $config = []){
       <div id="results" class="results"></div>
 
       <h3 style="margin:16px 0 8px"><?php echo esc_html($section_heading); ?></h3>
-      <div style="overflow:auto">
+      <div class="table-scroll">
         <table id="deckTable">
           <thead>
             <tr>
@@ -661,7 +662,7 @@ function ptcgdm_render_builder(array $config = []){
           </select>
         </div>
       </div>
-      <div style="overflow:auto">
+      <div class="table-scroll">
         <table id="inventoryDataTable">
           <thead>
             <tr>
