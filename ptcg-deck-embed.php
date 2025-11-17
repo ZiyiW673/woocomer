@@ -581,6 +581,7 @@ function ptcgdm_render_builder(array $config = []){
       .bulk-status.error{color:#f28b82}
       .btn.danger{background:linear-gradient(180deg,#ff4d4f,#d9363e)}
       .table-scroll{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px;margin:-4px 0 8px;padding:4px}
+      .inventory-actions{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
       .sync-control{display:flex;flex-direction:column;gap:6px;min-width:180px}
       .sync-progress-text{font-size:12px;color:var(--muted);margin:0;line-height:1.4}
       .sync-progress-text[hidden]{display:none!important}
@@ -2242,7 +2243,7 @@ function ptcgdm_render_builder(array $config = []){
           const actionButtons = [];
           actionButtons.push(`<button class="btn secondary" data-action="edit-price" data-name="${esc(meta.name)}">Change Price</button>`);
           actionButtons.push(`<button class="btn danger" data-action="delete-saved" data-name="${esc(meta.name)}">Delete</button>`);
-          rows.push(`<tr data-id="${esc(entry.id)}" data-card-name="${esc(meta.name)}"><td>${displayIndex}</td><td>${esc(meta.name)}</td><td>${esc(meta.setName)}</td><td>${esc(meta.number)}</td><td>${esc(meta.supertype)}</td>${variantCells.join('')}<td>${actionButtons.join(' ')}</td></tr>`);
+          rows.push(`<tr data-id="${esc(entry.id)}" data-card-name="${esc(meta.name)}"><td>${displayIndex}</td><td>${esc(meta.name)}</td><td>${esc(meta.setName)}</td><td>${esc(meta.number)}</td><td>${esc(meta.supertype)}</td>${variantCells.join('')}<td class="inventory-actions">${actionButtons.join('')}</td></tr>`);
         });
 
         if(!rows.length){
