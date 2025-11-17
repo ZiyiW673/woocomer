@@ -545,6 +545,7 @@ function ptcgdm_render_builder(array $config = []){
   }
 
   $deck_empty_colspan = 5 + $inventory_variant_count * 2 + 1;
+  $inventory_saved_colspan = $deck_empty_colspan + 1;
 ?>
   <div class="wrap">
     <h1><?php echo esc_html($page_title); ?></h1>
@@ -582,6 +583,8 @@ function ptcgdm_render_builder(array $config = []){
       .btn.danger{background:linear-gradient(180deg,#ff4d4f,#d9363e)}
       .table-scroll{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px;margin:-4px 0 8px;padding:4px}
       .inventory-actions{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
+      .inventory-select-col,.inventory-select-cell{text-align:center;width:40px}
+      .inventory-select-cell input[type="checkbox"]{width:16px;height:16px;margin:0}
       .sync-control{display:flex;flex-direction:column;gap:6px;min-width:180px}
       .sync-progress-text{font-size:12px;color:var(--muted);margin:0;line-height:1.4}
       .sync-progress-text[hidden]{display:none!important}
@@ -718,10 +721,20 @@ function ptcgdm_render_builder(array $config = []){
         </div>
       </div>
       <div class="muted" id="inventoryFilterStatus" style="margin:-4px 0 8px">Showing all saved cards.</div>
+      <div class="row" style="margin:0 0 8px;align-items:center;gap:12px;flex-wrap:wrap">
+        <div class="muted" style="font-size:12px">Selected: <span id="inventorySelectedCount">0</span></div>
+        <div class="inventory-actions" style="flex-wrap:wrap;gap:8px">
+          <button id="inventoryBulkChangePrice" class="btn secondary" disabled>Bulk Change Price</button>
+          <button id="inventoryBulkDelete" class="btn danger" disabled>Bulk Delete</button>
+        </div>
+      </div>
       <div class="table-scroll">
         <table id="inventoryDataTable">
           <thead>
             <tr>
+              <th class="inventory-select-col">
+                <input type="checkbox" id="inventoryBulkSelectAll" aria-label="Select all saved cards" disabled>
+              </th>
               <th>#</th>
               <th>Name</th>
               <th>Set</th>
@@ -736,7 +749,7 @@ function ptcgdm_render_builder(array $config = []){
           </thead>
           <tbody id="inventoryDataBody">
             <tr>
-              <td colspan="<?php echo esc_attr($deck_empty_colspan); ?>" class="muted">No inventory saved yet.</td>
+              <td colspan="<?php echo esc_attr($inventory_saved_colspan); ?>" class="muted">No inventory saved yet.</td>
             </tr>
           </tbody>
         </table>
@@ -778,7 +791,7 @@ function ptcgdm_render_builder(array $config = []){
       const INVENTORY_BUFFER_MIN = -999;
       const INVENTORY_BUFFER_MAX = 999;
       const INVENTORY_VARIANTS = <?php echo $inventory_variant_json; ?>;
-      const INVENTORY_SAVED_EMPTY_COLSPAN = 5 + INVENTORY_VARIANTS.length * 2 + 1;
+      const INVENTORY_SAVED_EMPTY_COLSPAN = <?php echo (int) $inventory_saved_colspan; ?>;
       const INVENTORY_NUMERIC_COLLATOR = (typeof Intl !== 'undefined' && typeof Intl.Collator === 'function')
         ? new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
         : null;
@@ -915,12 +928,17 @@ function ptcgdm_render_builder(array $config = []){
         inventoryFilterSupertype: document.getElementById('inventoryFilterSupertype'),
         inventoryFilterName: document.getElementById('inventoryFilterName'),
         inventoryFilterStatus: document.getElementById('inventoryFilterStatus'),
+        inventoryBulkSelectAll: document.getElementById('inventoryBulkSelectAll'),
+        inventoryBulkChangePrice: document.getElementById('inventoryBulkChangePrice'),
+        inventoryBulkDelete: document.getElementById('inventoryBulkDelete'),
+        inventorySelectedCount: document.getElementById('inventorySelectedCount'),
         syncProgress: document.getElementById('syncProgress'),
         syncProgressText: document.getElementById('syncProgressText')
       };
       const deck=[]; const deckMap=new Map();
       const inventoryData = [];
       const inventorySavedMap = new Map();
+      const inventoryBulkSelection = new Set();
       let inventorySortMode = (SAVE_CONFIG.inventorySortDefault === 'number') ? 'number' : 'alpha';
 
       if (els.btnSaveDeck) {
@@ -928,6 +946,12 @@ function ptcgdm_render_builder(array $config = []){
       }
       if (els.btnSyncInventory) {
         els.btnSyncInventory.dataset.defaultLabel = els.btnSyncInventory.textContent || '';
+      }
+      if (els.inventoryBulkChangePrice) {
+        els.inventoryBulkChangePrice.dataset.defaultLabel = els.inventoryBulkChangePrice.textContent || '';
+      }
+      if (els.inventoryBulkDelete) {
+        els.inventoryBulkDelete.dataset.defaultLabel = els.inventoryBulkDelete.textContent || '';
       }
 
       let isSavingDeck = false;
@@ -1216,6 +1240,16 @@ function ptcgdm_render_builder(array $config = []){
         }
         if (IS_INVENTORY && els.inventoryBody) {
           els.inventoryBody.addEventListener('click', handleInventoryBodyClick);
+          els.inventoryBody.addEventListener('change', handleInventorySelectionChange);
+        }
+        if (IS_INVENTORY && els.inventoryBulkSelectAll) {
+          els.inventoryBulkSelectAll.addEventListener('change', handleInventorySelectAllChange);
+        }
+        if (IS_INVENTORY && els.inventoryBulkChangePrice) {
+          els.inventoryBulkChangePrice.addEventListener('click', handleInventoryBulkChangePrice);
+        }
+        if (IS_INVENTORY && els.inventoryBulkDelete) {
+          els.inventoryBulkDelete.addEventListener('click', handleInventoryBulkDelete);
         }
         if (IS_INVENTORY && els.inventorySortMode) {
           if (inventorySortMode !== 'number' && inventorySortMode !== 'alpha') {
@@ -2209,6 +2243,7 @@ function ptcgdm_render_builder(array $config = []){
           els.inventoryBody.innerHTML = makeEmptyRow(defaultEmptyMessage);
           if(els.inventoryTotals) els.inventoryTotals.textContent = '0 cards';
           setInventoryFilterStatusMessage('No saved cards available.');
+          clearInventoryBulkSelection();
           return;
         }
 
@@ -2251,6 +2286,7 @@ function ptcgdm_render_builder(array $config = []){
           els.inventoryBody.innerHTML = makeEmptyRow(message);
           if(els.inventoryTotals) els.inventoryTotals.textContent = '0 cards';
           setInventoryFilterStatusMessage(message);
+          clearInventoryBulkSelection();
           return;
         }
 
@@ -2284,6 +2320,7 @@ function ptcgdm_render_builder(array $config = []){
           els.inventoryBody.innerHTML = makeEmptyRow(message);
           if(els.inventoryTotals) els.inventoryTotals.textContent = '0 cards';
           setInventoryFilterStatusMessage(message);
+          clearInventoryBulkSelection();
           return;
         }
 
@@ -2339,7 +2376,7 @@ function ptcgdm_render_builder(array $config = []){
           const actionButtons = [];
           actionButtons.push(`<button class="btn secondary" data-action="edit-price" data-name="${esc(meta.name)}">Change Price</button>`);
           actionButtons.push(`<button class="btn danger" data-action="delete-saved" data-name="${esc(meta.name)}">Delete</button>`);
-          rows.push(`<tr data-id="${esc(entry.id)}" data-card-name="${esc(meta.name)}"><td>${displayIndex}</td><td>${esc(meta.name)}</td><td>${esc(meta.setName)}</td><td>${esc(meta.number)}</td><td>${esc(meta.supertype)}</td>${variantCells.join('')}<td class="inventory-actions">${actionButtons.join('')}</td></tr>`);
+          rows.push(`<tr data-id="${esc(entry.id)}" data-card-name="${esc(meta.name)}"><td class="inventory-select-cell"><input type="checkbox" class="inventory-select" value="${esc(entry.id)}" aria-label="Select ${esc(meta.name)}"></td><td>${displayIndex}</td><td>${esc(meta.name)}</td><td>${esc(meta.setName)}</td><td>${esc(meta.number)}</td><td>${esc(meta.supertype)}</td>${variantCells.join('')}<td class="inventory-actions">${actionButtons.join('')}</td></tr>`);
         });
 
         if(!rows.length){
@@ -2347,10 +2384,12 @@ function ptcgdm_render_builder(array $config = []){
           els.inventoryBody.innerHTML = makeEmptyRow(message);
           if(els.inventoryTotals) els.inventoryTotals.textContent = '0 cards';
           setInventoryFilterStatusMessage(message);
+          clearInventoryBulkSelection();
           return;
         }
 
         els.inventoryBody.innerHTML = rows.join('');
+        syncInventorySelectionsWithRows();
         if(els.inventoryTotals) els.inventoryTotals.textContent = `${total} card${total===1?'':'s'}`;
         if(filterActive){
           const totalLabel = metaList.length === 1 ? 'card' : 'cards';
@@ -2367,6 +2406,83 @@ function ptcgdm_render_builder(array $config = []){
         if(!IS_INVENTORY || !els.inventoryFilterStatus) return;
         const text = message ? String(message) : '';
         els.inventoryFilterStatus.textContent = text;
+      }
+
+      function getVisibleInventoryRows(){
+        if(!IS_INVENTORY || !els.inventoryBody) return [];
+        return Array.from(els.inventoryBody.querySelectorAll('tr[data-id]'));
+      }
+
+      function clearInventoryBulkSelection(){
+        inventoryBulkSelection.clear();
+        updateInventoryBulkControls();
+      }
+
+      function syncInventorySelectionsWithRows(){
+        if(!IS_INVENTORY || !els.inventoryBody) return;
+        const rows = getVisibleInventoryRows();
+        const visibleIds = new Set(rows.map(row=>row.getAttribute('data-id') || ''));
+        Array.from(inventoryBulkSelection).forEach(id=>{
+          if(!visibleIds.has(id)){
+            inventoryBulkSelection.delete(id);
+          }
+        });
+        rows.forEach(row=>{
+          const checkbox = row.querySelector('.inventory-select');
+          if(!checkbox) return;
+          const id = row.getAttribute('data-id') || '';
+          checkbox.checked = inventoryBulkSelection.has(id);
+        });
+        updateInventoryBulkControls();
+      }
+
+      function updateInventoryBulkControls(){
+        if(!IS_INVENTORY) return;
+        const rows = getVisibleInventoryRows();
+        const visibleIds = new Set(rows.map(row=>row.getAttribute('data-id') || ''));
+        let selectedCount = 0;
+        inventoryBulkSelection.forEach(id=>{
+          if(visibleIds.has(id)){
+            selectedCount++;
+          }
+        });
+        if(els.inventorySelectedCount){
+          els.inventorySelectedCount.textContent = String(selectedCount);
+        }
+        if(els.inventoryBulkChangePrice){
+          const busy = els.inventoryBulkChangePrice.dataset.busy === '1';
+          els.inventoryBulkChangePrice.disabled = busy || selectedCount === 0;
+        }
+        if(els.inventoryBulkDelete){
+          const busy = els.inventoryBulkDelete.dataset.busy === '1';
+          els.inventoryBulkDelete.disabled = busy || selectedCount === 0;
+        }
+        if(els.inventoryBulkSelectAll){
+          const totalRows = rows.length;
+          els.inventoryBulkSelectAll.disabled = totalRows === 0;
+          if(totalRows === 0){
+            els.inventoryBulkSelectAll.checked = false;
+            els.inventoryBulkSelectAll.indeterminate = false;
+          }else{
+            els.inventoryBulkSelectAll.checked = selectedCount > 0 && selectedCount === totalRows;
+            els.inventoryBulkSelectAll.indeterminate = selectedCount > 0 && selectedCount < totalRows;
+          }
+        }
+      }
+
+      function getInventorySelectionIds(){
+        return Array.from(inventoryBulkSelection);
+      }
+
+      function getInventoryRowLabel(cardId){
+        if(!cardId) return '';
+        const rows = getVisibleInventoryRows();
+        for(const row of rows){
+          if(row.getAttribute('data-id') === cardId){
+            return row.getAttribute('data-card-name') || '';
+          }
+        }
+        return '';
       }
 
       function queueInventoryPriceChange(cardId){
@@ -2414,6 +2530,7 @@ function ptcgdm_render_builder(array $config = []){
       function removeInventoryEntryLocal(cardId){
         if(!cardId) return;
         const normalizedId = String(cardId);
+        inventoryBulkSelection.delete(normalizedId);
         const index = inventoryData.findIndex(entry=>entry && entry.id === normalizedId);
         if(index !== -1){
           inventoryData.splice(index, 1);
@@ -2436,12 +2553,16 @@ function ptcgdm_render_builder(array $config = []){
         updateJSON();
       }
 
-      async function deleteSavedInventoryEntry(cardId, button, cardName){
+      async function deleteSavedInventoryEntry(cardId, button, cardName, options = {}){
+        const { suppressAlert = false } = typeof options === 'object' && options ? options : {};
         const action = SAVE_CONFIG.deleteInventoryAction || '';
         const nonce = SAVE_CONFIG.deleteInventoryNonce || '';
         if(!cardId || !action || !nonce){
-          alert('Inventory delete action is unavailable.');
-          return;
+          const errorMessage = 'Inventory delete action is unavailable.';
+          if(!suppressAlert){
+            alert(errorMessage);
+          }
+          return { success: false, error: errorMessage };
         }
         const labelFallback = cardName || cardId;
         let restoreLabel = 'Delete';
@@ -2478,9 +2599,24 @@ function ptcgdm_render_builder(array $config = []){
           if(data.syncQueued){
             messages.push('Inventory sync queued in background.');
           }
-          alert(messages.join('\n'));
+          if(!suppressAlert){
+            alert(messages.join('\n'));
+          }
+          return {
+            success: true,
+            resolvedName,
+            message: messages.join('\n'),
+            syncQueued: !!data.syncQueued,
+          };
         }catch(err){
-          alert(`Delete failed: ${err && err.message ? err.message : err}`);
+          const errorMessage = err && err.message ? err.message : err;
+          if(!suppressAlert){
+            alert(`Delete failed: ${errorMessage}`);
+          }
+          return {
+            success: false,
+            error: errorMessage,
+          };
         }finally{
           if(button){
             button.disabled = false;
@@ -2511,10 +2647,126 @@ function ptcgdm_render_builder(array $config = []){
           deleteSavedInventoryEntry(cardId, button, cardName);
         }
       }
+
+      function handleInventorySelectionChange(event){
+        const target = event.target instanceof Element ? event.target : null;
+        if(!target || !target.classList.contains('inventory-select')) return;
+        const row = target.closest('tr[data-id]');
+        const cardId = row?.getAttribute('data-id') || target.getAttribute('value') || '';
+        if(!cardId) return;
+        if(target.checked){
+          inventoryBulkSelection.add(cardId);
+        }else{
+          inventoryBulkSelection.delete(cardId);
+        }
+        updateInventoryBulkControls();
+      }
+
+      function handleInventorySelectAllChange(event){
+        const target = event.target instanceof Element ? event.target : null;
+        if(!target) return;
+        const rows = getVisibleInventoryRows();
+        if(!rows.length){
+          clearInventoryBulkSelection();
+          if(target instanceof HTMLInputElement){
+            target.checked = false;
+            target.indeterminate = false;
+          }
+          return;
+        }
+        const shouldSelect = target instanceof HTMLInputElement ? target.checked : target.getAttribute('aria-checked') === 'true';
+        rows.forEach(row=>{
+          const id = row.getAttribute('data-id') || '';
+          if(!id) return;
+          if(shouldSelect){
+            inventoryBulkSelection.add(id);
+          }else{
+            inventoryBulkSelection.delete(id);
+          }
+          const checkbox = row.querySelector('.inventory-select');
+          if(checkbox){
+            checkbox.checked = shouldSelect;
+          }
+        });
+        updateInventoryBulkControls();
+      }
+
+      function handleInventoryBulkChangePrice(event){
+        event.preventDefault();
+        const selectedIds = getInventorySelectionIds();
+        if(!selectedIds.length){
+          alert('Select at least one saved card to change price.');
+          return;
+        }
+        if(els.inventoryBulkChangePrice){
+          els.inventoryBulkChangePrice.dataset.busy = '1';
+          els.inventoryBulkChangePrice.textContent = 'Loading…';
+        }
+        selectedIds.forEach(cardId=>{
+          queueInventoryPriceChange(cardId);
+        });
+        if(els.inventoryBulkChangePrice){
+          els.inventoryBulkChangePrice.dataset.busy = '';
+          els.inventoryBulkChangePrice.textContent = els.inventoryBulkChangePrice.dataset.defaultLabel || 'Bulk Change Price';
+        }
+        const label = selectedIds.length === 1 ? 'card' : 'cards';
+        alert(`${selectedIds.length} ${label} added to the buffer for price updates.`);
+        inventoryBulkSelection.clear();
+        syncInventorySelectionsWithRows();
+      }
+
+      async function handleInventoryBulkDelete(event){
+        event.preventDefault();
+        const selectedIds = getInventorySelectionIds();
+        if(!selectedIds.length){
+          alert('Select at least one saved card to delete.');
+          return;
+        }
+        let confirmationMessage = '';
+        if(selectedIds.length === 1){
+          const name = getInventoryRowLabel(selectedIds[0]) || selectedIds[0];
+          confirmationMessage = `Delete ${name} from saved inventory and remove its WooCommerce product?`;
+        }else{
+          confirmationMessage = `Delete ${selectedIds.length} saved cards and remove their WooCommerce products?`;
+        }
+        if(!window.confirm(confirmationMessage)) return;
+        if(els.inventoryBulkDelete){
+          els.inventoryBulkDelete.dataset.busy = '1';
+          els.inventoryBulkDelete.textContent = 'Deleting…';
+        }
+        let failure = null;
+        let successCount = 0;
+        for(const cardId of selectedIds){
+          const name = getInventoryRowLabel(cardId) || cardId;
+          const result = await deleteSavedInventoryEntry(cardId, null, name, { suppressAlert: true });
+          if(result?.success){
+            successCount++;
+          }else{
+            failure = { name, error: result?.error || 'Unknown error' };
+            break;
+          }
+        }
+        if(els.inventoryBulkDelete){
+          els.inventoryBulkDelete.dataset.busy = '';
+          els.inventoryBulkDelete.textContent = els.inventoryBulkDelete.dataset.defaultLabel || 'Bulk Delete';
+        }
+        if(failure){
+          syncInventorySelectionsWithRows();
+          alert(`Bulk delete failed for ${failure.name}: ${failure.error}`);
+          return;
+        }
+        inventoryBulkSelection.clear();
+        syncInventorySelectionsWithRows();
+        if(successCount > 0){
+          const label = successCount === 1 ? 'card' : 'cards';
+          alert(`Deleted ${successCount} ${label} from saved inventory.`);
+        }
+      }
       function setInventoryData(entries){
         if(!IS_INVENTORY) return;
         inventoryData.length = 0;
         inventorySavedMap.clear();
+        inventoryBulkSelection.clear();
         if(Array.isArray(entries)){
           const normalizedEntries = aggregateInventoryEntries(entries, []);
           normalizedEntries.forEach(entry=>{
