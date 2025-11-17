@@ -573,6 +573,11 @@ function ptcgdm_render_builder(array $config = []){
       .bulk-status.error{color:#f28b82}
       .btn.danger{background:linear-gradient(180deg,#ff4d4f,#d9363e)}
       .table-scroll{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px;margin:-4px 0 8px;padding:4px}
+      .sync-control{display:flex;flex-direction:column;gap:6px;min-width:180px}
+      .sync-progress{position:relative;height:10px;border-radius:999px;background:#0f1218;border:1px solid var(--line);overflow:hidden}
+      .sync-progress[hidden]{display:none!important}
+      .sync-progress-bar{position:absolute;left:-40%;top:0;height:100%;width:40%;background:linear-gradient(90deg,#4facfe,#00f2fe);animation:sync-progress 1.2s ease-in-out infinite}
+      @keyframes sync-progress{0%{left:-40%}100%{left:100%}}
     </style>
 
     <div class="ptcg" id="ptcg-root">
@@ -655,7 +660,12 @@ function ptcgdm_render_builder(array $config = []){
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <button id="btnSaveDeck" class="btn secondary" disabled><?php echo esc_html($save_button_label); ?></button>
           <?php if ($mode === 'inventory') : ?>
-            <button id="btnSyncInventory" class="btn secondary" data-syncing-label="Syncing…">Sync Products</button>
+            <div class="sync-control">
+              <button id="btnSyncInventory" class="btn secondary" data-syncing-label="Syncing…">Sync Products</button>
+              <div id="syncProgress" class="sync-progress" hidden aria-live="polite">
+                <div class="sync-progress-bar"></div>
+              </div>
+            </div>
           <?php endif; ?>
         </div>
         <div><strong>Buffer Total:</strong> <span id="deckTotals" class="chip">0 cards</span></div>
@@ -860,7 +870,8 @@ function ptcgdm_render_builder(array $config = []){
         bulkStatus: document.getElementById('bulkStatus'),
         inventoryBody: document.getElementById('inventoryDataBody'),
         inventoryTotals: document.getElementById('inventoryTotals'),
-        inventorySortMode: document.getElementById('inventorySortMode')
+        inventorySortMode: document.getElementById('inventorySortMode'),
+        syncProgress: document.getElementById('syncProgress')
       };
       const deck=[]; const deckMap=new Map();
       const inventoryData = [];
@@ -2791,6 +2802,7 @@ function ptcgdm_render_builder(array $config = []){
           return;
         }
         isManualSyncing = true;
+        setSyncProgressVisible(true);
         const button = els.btnSyncInventory || null;
         const defaultLabel = button ? (button.dataset.defaultLabel || button.textContent || '') : '';
         if (button) {
@@ -2822,10 +2834,21 @@ function ptcgdm_render_builder(array $config = []){
           alert(`Sync failed: ${msg}`);
         } finally {
           isManualSyncing = false;
+          setSyncProgressVisible(false);
           if (button) {
             button.disabled = false;
             button.textContent = defaultLabel || 'Sync Products';
           }
+        }
+      }
+
+      function setSyncProgressVisible(visible){
+        const bar = els.syncProgress;
+        if (!bar) return;
+        if (visible) {
+          bar.hidden = false;
+        } else {
+          bar.hidden = true;
         }
       }
 
