@@ -432,16 +432,21 @@ function ptcgdm_render_builder(array $config = []){
     $auto_load_url = $saved_decks[0]['url'];
   }
   $nonce = wp_create_nonce($nonce_action);
-  $delete_inventory_action = '';
-  $delete_inventory_nonce  = '';
-  $manual_sync_action      = '';
-  $manual_sync_nonce       = '';
+  $delete_inventory_action      = '';
+  $delete_inventory_nonce       = '';
+  $manual_sync_action           = '';
+  $manual_sync_nonce            = '';
+  $manual_sync_status_action    = '';
+  $manual_sync_status_nonce     = '';
+  $manual_sync_poll_interval_ms = 5000;
   $inventory_sort_default  = 'alpha';
   if ($mode === 'inventory') {
     $delete_inventory_action = 'ptcgdm_delete_inventory_card';
     $delete_inventory_nonce  = wp_create_nonce('ptcgdm_delete_inventory_card');
     $manual_sync_action      = 'ptcgdm_manual_inventory_sync';
     $manual_sync_nonce       = wp_create_nonce('ptcgdm_manual_inventory_sync');
+    $manual_sync_status_action = 'ptcgdm_get_inventory_sync_status';
+    $manual_sync_status_nonce  = wp_create_nonce('ptcgdm_get_inventory_sync_status');
   }
 
   $data_base_url = esc_js($data_url);
@@ -460,8 +465,11 @@ function ptcgdm_render_builder(array $config = []){
     'mode'                => $mode,
     'deleteInventoryAction' => $delete_inventory_action,
     'deleteInventoryNonce'  => $delete_inventory_nonce,
-    'manualSyncAction'      => $manual_sync_action,
-    'manualSyncNonce'       => $manual_sync_nonce,
+    'manualSyncAction'        => $manual_sync_action,
+    'manualSyncNonce'         => $manual_sync_nonce,
+    'manualSyncStatusAction'  => $manual_sync_status_action,
+    'manualSyncStatusNonce'   => $manual_sync_status_nonce,
+    'manualSyncPollInterval'  => $manual_sync_poll_interval_ms,
     'inventorySortDefault'  => $inventory_sort_default,
     'seriesConfig'        => $series_config,
     'setLabels'           => $set_labels,
@@ -731,6 +739,9 @@ function ptcgdm_render_builder(array $config = []){
         deleteInventoryNonce: '',
         manualSyncAction: '',
         manualSyncNonce: '',
+        manualSyncStatusAction: '',
+        manualSyncStatusNonce: '',
+        manualSyncPollInterval: 5000,
         inventorySortDefault: 'alpha',
       }, <?php echo $script_config; ?>);
       const MODE = 'inventory';
@@ -887,6 +898,9 @@ function ptcgdm_render_builder(array $config = []){
 
       let isSavingDeck = false;
       let isManualSyncing = false;
+      let manualSyncRunId = '';
+      let manualSyncPollTimer = 0;
+      const MANUAL_SYNC_POLL_INTERVAL = Math.max(3000, Number(SAVE_CONFIG.manualSyncPollInterval) || 5000);
       let deckNameState = typeof SAVE_CONFIG.defaultEntryName === 'string' ? SAVE_CONFIG.defaultEntryName : '';
       let deckFormatState = typeof SAVE_CONFIG.defaultFormat === 'string' ? SAVE_CONFIG.defaultFormat : '';
 
@@ -2802,6 +2816,7 @@ function ptcgdm_render_builder(array $config = []){
           return;
         }
         isManualSyncing = true;
+        manualSyncRunId = '';
         setSyncProgressVisible(true);
         const button = els.btnSyncInventory || null;
         const defaultLabel = button ? (button.dataset.defaultLabel || button.textContent || '') : '';
@@ -2819,25 +2834,36 @@ function ptcgdm_render_builder(array $config = []){
           }
           const result = await response.json();
           if (!result?.success) {
-            throw new Error(result?.data || 'Unknown error');
+            throw new Error(getManualSyncErrorMessage(result?.data, 'Unknown error'));
           }
           const data = result.data || {};
-          let message = '';
-          if (data.message) {
-            message = data.message;
-          } else if (data.syncQueued) {
-            message = 'Inventory sync queued. WooCommerce products will update shortly.';
+          const status = normalizeManualSyncStatus(data.status);
+          const immediateMessage = data.message || ((data.syncQueued || data.queued) ? 'Inventory sync queued. WooCommerce products will update shortly.' : '');
+          const state = status.state;
+          const runId = status.runId;
+          if (immediateMessage && state !== 'success' && state !== 'error') {
+            alert(immediateMessage);
           }
-          alert(message || 'Inventory sync started.');
+          if (state === 'success') {
+            stopManualSyncPolling(status.message || 'Inventory sync completed successfully.', false);
+            return;
+          }
+          if (state === 'error') {
+            stopManualSyncPolling(status.message || 'Unable to sync inventory.', true);
+            return;
+          }
+          if (runId && SAVE_CONFIG.manualSyncStatusAction && SAVE_CONFIG.manualSyncStatusNonce) {
+            manualSyncRunId = runId;
+            startManualSyncPolling();
+            return;
+          }
+          stopManualSyncPolling(status.message || immediateMessage || 'Inventory sync request sent.', false);
         } catch (err) {
           const msg = err && err.message ? err.message : err;
-          alert(`Sync failed: ${msg}`);
+          stopManualSyncPolling(msg || 'Unknown error', true);
         } finally {
-          isManualSyncing = false;
-          setSyncProgressVisible(false);
-          if (button) {
-            button.disabled = false;
-            button.textContent = defaultLabel || 'Sync Products';
+          if (!manualSyncPollTimer) {
+            finishManualSyncUI();
           }
         }
       }
@@ -2849,6 +2875,178 @@ function ptcgdm_render_builder(array $config = []){
           bar.hidden = false;
         } else {
           bar.hidden = true;
+        }
+      }
+
+      function finishManualSyncUI(){
+        isManualSyncing = false;
+        setSyncProgressVisible(false);
+        const button = els.btnSyncInventory || null;
+        if (button) {
+          const defaultLabel = button.dataset ? (button.dataset.defaultLabel || '') : '';
+          button.disabled = false;
+          button.textContent = defaultLabel || 'Sync Products';
+        }
+      }
+
+      function normalizeManualSyncStatus(raw){
+        const status = {
+          state: 'idle',
+          message: '',
+          runId: '',
+          result: '',
+          updated: Date.now(),
+          lastRun: {
+            runId: '',
+            state: '',
+            message: '',
+            result: '',
+            updated: 0,
+          },
+        };
+        if (raw && typeof raw === 'object') {
+          const state = (raw.state || raw.status || '').toString().toLowerCase();
+          if (state) {
+            status.state = state;
+          }
+          if (typeof raw.message === 'string') {
+            status.message = raw.message;
+          }
+          if (typeof raw.result === 'string') {
+            status.result = raw.result;
+          }
+          if (typeof raw.runId === 'string') {
+            status.runId = raw.runId;
+          } else if (typeof raw.run_id === 'string') {
+            status.runId = raw.run_id;
+          }
+          if (typeof raw.updated === 'number' && Number.isFinite(raw.updated)) {
+            status.updated = raw.updated;
+          }
+          const lastRunRaw = raw.last_run || raw.lastRun;
+          if (lastRunRaw && typeof lastRunRaw === 'object') {
+            if (typeof lastRunRaw.id === 'string') {
+              status.lastRun.runId = lastRunRaw.id;
+            } else if (typeof lastRunRaw.runId === 'string') {
+              status.lastRun.runId = lastRunRaw.runId;
+            }
+            if (typeof lastRunRaw.state === 'string') {
+              status.lastRun.state = lastRunRaw.state.toLowerCase();
+            }
+            if (typeof lastRunRaw.message === 'string') {
+              status.lastRun.message = lastRunRaw.message;
+            }
+            if (typeof lastRunRaw.result === 'string') {
+              status.lastRun.result = lastRunRaw.result.toLowerCase();
+            }
+            if (typeof lastRunRaw.updated === 'number' && Number.isFinite(lastRunRaw.updated)) {
+              status.lastRun.updated = lastRunRaw.updated;
+            }
+          }
+        }
+        return status;
+      }
+
+      function getManualSyncErrorMessage(data, fallback){
+        let message = '';
+        if (data && typeof data === 'object') {
+          if (typeof data.message === 'string') {
+            message = data.message;
+          } else if (typeof data.error === 'string') {
+            message = data.error;
+          } else if (typeof data.data === 'string') {
+            message = data.data;
+          }
+        } else if (typeof data === 'string') {
+          message = data;
+        }
+        message = (message || '').trim();
+        if (!message) {
+          message = typeof fallback === 'string' && fallback ? fallback : 'Unknown error';
+        }
+        return message;
+      }
+
+      function startManualSyncPolling(){
+        if (!manualSyncRunId) {
+          return;
+        }
+        if (manualSyncPollTimer) {
+          window.clearInterval(manualSyncPollTimer);
+        }
+        manualSyncPollTimer = window.setInterval(()=>{
+          pollManualSyncStatus();
+        }, MANUAL_SYNC_POLL_INTERVAL);
+        pollManualSyncStatus();
+      }
+
+      async function pollManualSyncStatus(){
+        const action = SAVE_CONFIG.manualSyncStatusAction || '';
+        const nonce = SAVE_CONFIG.manualSyncStatusNonce || '';
+        if (!action || !nonce) {
+          stopManualSyncPolling('Manual sync status is unavailable.', true);
+          return;
+        }
+        const body = new FormData();
+        body.append('action', action);
+        body.append('nonce', nonce);
+        if (manualSyncRunId) {
+          body.append('runId', manualSyncRunId);
+        }
+        try {
+          const response = await fetch(AJAX_URL, { method: 'POST', body });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const result = await response.json();
+          if (!result?.success) {
+            throw new Error(getManualSyncErrorMessage(result?.data, 'Unknown error'));
+          }
+          const status = normalizeManualSyncStatus(result?.data?.status || {});
+          if (status.runId && manualSyncRunId && status.runId !== manualSyncRunId) {
+            const lastRun = status.lastRun || {};
+            if (lastRun.runId && lastRun.runId === manualSyncRunId) {
+              if (lastRun.state === 'success') {
+                stopManualSyncPolling(lastRun.message || 'Inventory sync completed successfully.', false);
+              } else if (lastRun.state === 'error') {
+                stopManualSyncPolling(lastRun.message || 'Inventory sync failed.', true);
+              } else {
+                stopManualSyncPolling(lastRun.message || 'Inventory sync finished.', false);
+              }
+              return;
+            }
+            return;
+          }
+          if (!manualSyncRunId && status.runId) {
+            manualSyncRunId = status.runId;
+          }
+          const state = status.state;
+          if (state === 'success') {
+            stopManualSyncPolling(status.message || 'Inventory sync completed successfully.', false);
+            return;
+          }
+          if (state === 'error') {
+            stopManualSyncPolling(status.message || 'Inventory sync failed.', true);
+            return;
+          }
+          if (state !== 'queued' && state !== 'running') {
+            stopManualSyncPolling(status.message || 'Inventory sync finished.', false);
+          }
+        } catch (pollError) {
+          const msg = pollError && pollError.message ? pollError.message : pollError;
+          stopManualSyncPolling(msg || 'Unable to check sync status.', true);
+        }
+      }
+
+      function stopManualSyncPolling(message, isError){
+        if (manualSyncPollTimer) {
+          window.clearInterval(manualSyncPollTimer);
+          manualSyncPollTimer = 0;
+        }
+        manualSyncRunId = '';
+        finishManualSyncUI();
+        if (message) {
+          alert(isError ? `Sync failed: ${message}` : message);
         }
       }
 
@@ -3199,29 +3397,70 @@ add_action('wp_ajax_ptcgdm_manual_inventory_sync', function(){
 
   check_ajax_referer('ptcgdm_manual_inventory_sync', 'nonce');
 
-  $result = ptcgdm_run_inventory_sync_now();
-
-  if ($result === true) {
-    wp_send_json_success([
-      'synced'  => true,
-      'message' => 'Inventory sync completed successfully.',
+  if (ptcgdm_is_inventory_syncing()) {
+    $status = ptcgdm_get_inventory_sync_status();
+    $message = $status['message'] ?: __('Inventory sync is already running. Please wait for it to finish.', 'ptcgdm');
+    wp_send_json_error([
+      'message' => $message,
+      'status'  => $status,
     ]);
   }
 
-  if (is_wp_error($result)) {
-    $message = $result->get_error_message();
-    wp_send_json_error($message ? $message : 'Unable to sync inventory.');
-  }
+  $run_id = ptcgdm_generate_inventory_sync_run_id();
+  $queued_message = __('Inventory sync queued. WooCommerce products will update shortly.', 'ptcgdm');
+  ptcgdm_set_inventory_sync_status('queued', $queued_message, [
+    'run_id' => $run_id,
+    'result' => '',
+  ]);
 
   $syncQueued = ptcgdm_trigger_inventory_sync();
   if ($syncQueued) {
     wp_send_json_success([
+      'queued'  => true,
       'syncQueued' => true,
-      'message'    => 'Inventory sync queued. WooCommerce products will update shortly.',
+      'message' => $queued_message,
+      'status'  => ptcgdm_get_inventory_sync_status(),
     ]);
   }
 
-  wp_send_json_error('Unable to start inventory sync. Please try again.');
+  $result = ptcgdm_run_inventory_sync_now(['run_id' => $run_id]);
+
+  if ($result === true) {
+    $status = ptcgdm_get_inventory_sync_status();
+    wp_send_json_success([
+      'synced'  => true,
+      'message' => $status['message'] ?: __('Inventory sync completed successfully.', 'ptcgdm'),
+      'status'  => $status,
+    ]);
+  }
+
+  if (is_wp_error($result)) {
+    $status = ptcgdm_get_inventory_sync_status();
+    $message = $result->get_error_message();
+    wp_send_json_error([
+      'message' => $message ? $message : __('Unable to sync inventory.', 'ptcgdm'),
+      'status'  => $status,
+    ]);
+  }
+
+  wp_send_json_error([
+    'message' => __('Unable to start inventory sync. Please try again.', 'ptcgdm'),
+    'status'  => ptcgdm_get_inventory_sync_status(),
+  ]);
+});
+
+add_action('wp_ajax_ptcgdm_get_inventory_sync_status', function(){
+  if (!current_user_can('manage_options')) {
+    wp_send_json_error('Permission denied', 403);
+  }
+
+  check_ajax_referer('ptcgdm_get_inventory_sync_status', 'nonce');
+
+  $status = ptcgdm_get_inventory_sync_status();
+
+  wp_send_json_success([
+    'status' => $status,
+  ]);
 });
 
 function ptcgdm_handle_inventory_sync_async_request() {
@@ -4949,6 +5188,130 @@ function ptcgdm_set_inventory_syncing($flag) {
   }
 }
 
+function ptcgdm_get_inventory_sync_status_option_name() {
+  return 'ptcgdm_inventory_sync_status';
+}
+
+function ptcgdm_get_inventory_sync_status_defaults() {
+  return [
+    'state'   => 'idle',
+    'message' => '',
+    'run_id'  => '',
+    'result'  => '',
+    'updated' => time(),
+    'last_run'=> [],
+  ];
+}
+
+function ptcgdm_get_inventory_sync_status() {
+  $option_name = ptcgdm_get_inventory_sync_status_option_name();
+  $stored = get_option($option_name, []);
+  if (!is_array($stored)) {
+    $stored = [];
+  }
+
+  $defaults = ptcgdm_get_inventory_sync_status_defaults();
+  $status = array_merge($defaults, $stored);
+  $state = isset($status['state']) ? strtolower(trim((string) $status['state'])) : 'idle';
+  $status['state'] = $state !== '' ? $state : 'idle';
+  $status['message'] = isset($status['message']) && is_string($status['message']) ? $status['message'] : '';
+  $status['run_id'] = isset($status['run_id']) && is_string($status['run_id']) ? $status['run_id'] : '';
+  $status['result'] = isset($status['result']) && is_string($status['result']) ? $status['result'] : '';
+  $status['updated'] = isset($status['updated']) && is_numeric($status['updated']) ? (int) $status['updated'] : time();
+
+  $last_run = [];
+  if (!empty($status['last_run']) && is_array($status['last_run'])) {
+    $last_run = $status['last_run'];
+  }
+
+  $status['last_run'] = [
+    'id'      => isset($last_run['id']) && is_string($last_run['id']) ? $last_run['id'] : '',
+    'state'   => isset($last_run['state']) && is_string($last_run['state']) ? strtolower($last_run['state']) : '',
+    'message' => isset($last_run['message']) && is_string($last_run['message']) ? $last_run['message'] : '',
+    'result'  => isset($last_run['result']) && is_string($last_run['result']) ? strtolower($last_run['result']) : '',
+    'updated' => isset($last_run['updated']) && is_numeric($last_run['updated']) ? (int) $last_run['updated'] : 0,
+  ];
+
+  return $status;
+}
+
+function ptcgdm_set_inventory_sync_status($state, $message = '', array $extra = []) {
+  $status = ptcgdm_get_inventory_sync_status();
+  $state = strtolower(trim((string) $state));
+  if ($state === '') {
+    $state = 'idle';
+  }
+
+  $status['state'] = $state;
+  $status['message'] = is_string($message) ? $message : '';
+  $status['updated'] = time();
+
+  if (isset($extra['run_id']) && is_string($extra['run_id'])) {
+    $status['run_id'] = $extra['run_id'];
+  } elseif (isset($extra['runId']) && is_string($extra['runId'])) {
+    $status['run_id'] = $extra['runId'];
+  }
+
+  if (isset($extra['result']) && is_string($extra['result'])) {
+    $status['result'] = $extra['result'];
+  } elseif ($state === 'success') {
+    $status['result'] = 'success';
+  } elseif ($state === 'error') {
+    $status['result'] = 'error';
+  }
+
+  if (!isset($status['last_run']) || !is_array($status['last_run'])) {
+    $status['last_run'] = [
+      'id' => '',
+      'state' => '',
+      'message' => '',
+      'result' => '',
+      'updated' => 0,
+    ];
+  }
+
+  if (in_array($state, ['success', 'error'], true)) {
+    $status['last_run'] = [
+      'id'      => $status['run_id'],
+      'state'   => $state,
+      'message' => $status['message'],
+      'result'  => $state === 'success' ? 'success' : 'error',
+      'updated' => $status['updated'],
+    ];
+  }
+
+  update_option(ptcgdm_get_inventory_sync_status_option_name(), $status, false);
+
+  return $status;
+}
+
+function ptcgdm_generate_inventory_sync_run_id() {
+  if (function_exists('wp_generate_uuid4')) {
+    return wp_generate_uuid4();
+  }
+
+  try {
+    $bytes = random_bytes(16);
+    return bin2hex($bytes);
+  } catch (Exception $e) {
+    return uniqid('ptcgdm_sync_', true);
+  }
+}
+
+function ptcgdm_determine_inventory_sync_run_id($preferred = '') {
+  $preferred = is_string($preferred) ? trim($preferred) : '';
+  if ($preferred !== '') {
+    return $preferred;
+  }
+
+  $status = ptcgdm_get_inventory_sync_status();
+  if (!empty($status['run_id']) && in_array($status['state'], ['queued', 'running'], true)) {
+    return $status['run_id'];
+  }
+
+  return ptcgdm_generate_inventory_sync_run_id();
+}
+
 function ptcgdm_queue_inventory_sync() {
   $hook = 'ptcgdm_run_inventory_sync';
   $event_scheduled = false;
@@ -5056,10 +5419,19 @@ function ptcgdm_prepare_inventory_sync_environment() {
   }
 }
 
-function ptcgdm_run_inventory_sync_now() {
+function ptcgdm_run_inventory_sync_now($args = []) {
   if (ptcgdm_is_inventory_syncing()) {
     return new WP_Error('ptcgdm_sync_running', __('Inventory sync is already running. Please wait for it to finish.', 'ptcgdm'));
   }
+
+  $args = is_array($args) ? $args : [];
+  $run_id = isset($args['run_id']) ? (string) $args['run_id'] : '';
+  $run_id = ptcgdm_determine_inventory_sync_run_id($run_id);
+
+  ptcgdm_set_inventory_sync_status('running', __('Inventory sync is running…', 'ptcgdm'), [
+    'run_id' => $run_id,
+    'result' => '',
+  ]);
 
   ptcgdm_prepare_inventory_sync_environment();
 
@@ -5067,26 +5439,46 @@ function ptcgdm_run_inventory_sync_now() {
   $path = $dir . PTCGDM_INVENTORY_FILENAME;
 
   if (!file_exists($path)) {
+    ptcgdm_set_inventory_sync_status('error', __('No saved inventory snapshot was found. Please save your inventory first.', 'ptcgdm'), [
+      'run_id' => $run_id,
+      'result' => 'error',
+    ]);
     return new WP_Error('ptcgdm_sync_missing', __('No saved inventory snapshot was found. Please save your inventory first.', 'ptcgdm'));
   }
 
   if (!is_readable($path)) {
+    ptcgdm_set_inventory_sync_status('error', __('Inventory snapshot is not readable.', 'ptcgdm'), [
+      'run_id' => $run_id,
+      'result' => 'error',
+    ]);
     return new WP_Error('ptcgdm_sync_unreadable', __('Inventory snapshot is not readable.', 'ptcgdm'));
   }
 
   $raw = @file_get_contents($path);
   if ($raw === false) {
+    ptcgdm_set_inventory_sync_status('error', __('Unable to read the inventory snapshot.', 'ptcgdm'), [
+      'run_id' => $run_id,
+      'result' => 'error',
+    ]);
     return new WP_Error('ptcgdm_sync_read_error', __('Unable to read the inventory snapshot.', 'ptcgdm'));
   }
 
   $raw = trim((string) $raw);
   if ($raw === '') {
     ptcgdm_sync_inventory_products([]);
+    ptcgdm_set_inventory_sync_status('success', __('Inventory sync completed successfully.', 'ptcgdm'), [
+      'run_id' => $run_id,
+      'result' => 'success',
+    ]);
     return true;
   }
 
   $data = json_decode($raw, true);
   if (!is_array($data)) {
+    ptcgdm_set_inventory_sync_status('error', __('Inventory snapshot contains invalid data.', 'ptcgdm'), [
+      'run_id' => $run_id,
+      'result' => 'error',
+    ]);
     return new WP_Error('ptcgdm_sync_invalid', __('Inventory snapshot contains invalid data.', 'ptcgdm'));
   }
 
@@ -5107,8 +5499,18 @@ function ptcgdm_run_inventory_sync_now() {
       $message = __('Inventory sync encountered an unexpected error.', 'ptcgdm');
     }
 
+    ptcgdm_set_inventory_sync_status('error', $message, [
+      'run_id' => $run_id,
+      'result' => 'error',
+    ]);
+
     return new WP_Error('ptcgdm_sync_exception', $message);
   }
+
+  ptcgdm_set_inventory_sync_status('success', __('Inventory sync completed successfully.', 'ptcgdm'), [
+    'run_id' => $run_id,
+    'result' => 'success',
+  ]);
 
   return true;
 }
