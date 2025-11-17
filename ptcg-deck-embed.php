@@ -4838,7 +4838,9 @@ function ptcgdm_queue_inventory_sync() {
 
 function ptcgdm_trigger_inventory_sync() {
   $queued = ptcgdm_queue_inventory_sync();
-  ptcgdm_run_inventory_sync_event();
+  if (!$queued && !ptcgdm_is_inventory_syncing()) {
+    ptcgdm_run_inventory_sync_event();
+  }
   return $queued;
 }
 
