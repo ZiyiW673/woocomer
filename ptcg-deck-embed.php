@@ -790,6 +790,7 @@ function ptcgdm_render_builder(array $config = []){
       const IS_INVENTORY = true;
       const INVENTORY_BUFFER_MIN = -999;
       const INVENTORY_BUFFER_MAX = 999;
+      const INVENTORY_BUFFER_CARD_LIMIT = 50;
       const INVENTORY_VARIANTS = <?php echo $inventory_variant_json; ?>;
       const INVENTORY_SAVED_EMPTY_COLSPAN = <?php echo (int) $inventory_saved_colspan; ?>;
       const INVENTORY_NUMERIC_COLLATOR = (typeof Intl !== 'undefined' && typeof Intl.Collator === 'function')
@@ -936,6 +937,7 @@ function ptcgdm_render_builder(array $config = []){
         syncProgressText: document.getElementById('syncProgressText')
       };
       const deck=[]; const deckMap=new Map();
+      let deckErrorMessage='';
       const inventoryData = [];
       const inventorySavedMap = new Map();
       const inventoryBulkSelection = new Set();
@@ -961,6 +963,24 @@ function ptcgdm_render_builder(array $config = []){
       const MANUAL_SYNC_POLL_INTERVAL = Math.max(3000, Number(SAVE_CONFIG.manualSyncPollInterval) || 5000);
       let deckNameState = typeof SAVE_CONFIG.defaultEntryName === 'string' ? SAVE_CONFIG.defaultEntryName : '';
       let deckFormatState = typeof SAVE_CONFIG.defaultFormat === 'string' ? SAVE_CONFIG.defaultFormat : '';
+
+      function setDeckError(message){
+        deckErrorMessage = message ? String(message) : '';
+      }
+
+      function clearDeckError(){
+        deckErrorMessage='';
+      }
+
+      function consumeDeckError(){
+        const message = deckErrorMessage;
+        deckErrorMessage='';
+        return message;
+      }
+
+      function getInventoryBufferLimitMessage(){
+        return `The buffer can only hold ${INVENTORY_BUFFER_CARD_LIMIT} cards. Save or remove cards before adding more.`;
+      }
 
       function getDeckNameValue(){
         if (els.deckName && typeof els.deckName.value === 'string') {
@@ -1818,7 +1838,9 @@ function ptcgdm_render_builder(array $config = []){
           const card = byId.get(cardId);
           const delta = applyDeckQuantity(cardId, parsed.qty, parsed.variantQuantities);
           if(delta === null){
-            errors.push(`Line ${idx+1}: Unable to add card.`);
+            const deckError = consumeDeckError();
+            const message = deckError || 'Unable to add card.';
+            errors.push(`Line ${idx+1}: ${message}`);
             return;
           }
             if(delta === 0){
@@ -2134,12 +2156,19 @@ function ptcgdm_render_builder(array $config = []){
         const source = qtyOverride !== undefined ? qtyOverride : els.selQty.value;
         const qty = Math.max(1, Math.min(60, parseInt(source, 10) || 1));
         const delta = applyDeckQuantity(id, qty);
-        if(delta === null) return;
+        if(delta === null){
+          const deckError = consumeDeckError();
+          if(deckError){
+            alert(deckError);
+          }
+          return;
+        }
         if(qtyOverride === undefined) els.selQty.value=1;
         if(delta !== 0){ renderDeckTable(); updateJSON(); }
       }
 
       function applyDeckQuantity(id, qty, variantQuantities){
+        clearDeckError();
         if(!id) return null;
         const safeQty = IS_INVENTORY ? clampBufferQty(qty) : Math.max(1, Math.min(60, parseInt(qty, 10) || 1));
         const hasVariantQuantities = IS_INVENTORY && variantQuantities && typeof variantQuantities === 'object';
@@ -2192,6 +2221,10 @@ function ptcgdm_render_builder(array $config = []){
           const delta = next - current;
           deck[idx].qty = next;
           return delta;
+        }
+        if(IS_INVENTORY && deck.length >= INVENTORY_BUFFER_CARD_LIMIT){
+          setDeckError(getInventoryBufferLimitMessage());
+          return null;
         }
         const initial = IS_INVENTORY ? clampBufferQty(safeQty) : Math.max(1, Math.min(60, safeQty));
         const index = deck.length;
@@ -2486,11 +2519,11 @@ function ptcgdm_render_builder(array $config = []){
       }
 
       function queueInventoryPriceChange(cardId){
-        if(!IS_INVENTORY || !cardId) return;
+        if(!IS_INVENTORY || !cardId) return false;
         const entry = createDeckEntryFromSaved(cardId);
         if(!entry){
           alert('Saved inventory details are unavailable for this card.');
-          return;
+          return false;
         }
         let replaced = false;
         if(deckMap.has(cardId)){
@@ -2501,6 +2534,10 @@ function ptcgdm_render_builder(array $config = []){
           }
         }
         if(!replaced){
+          if(deck.length >= INVENTORY_BUFFER_CARD_LIMIT){
+            alert(getInventoryBufferLimitMessage());
+            return false;
+          }
           deck.push(entry);
         }
         deckMap.clear();
@@ -2525,6 +2562,7 @@ function ptcgdm_render_builder(array $config = []){
             priceInput.select();
           }
         }
+        return true;
       }
 
       function removeInventoryEntryLocal(cardId){
@@ -2702,15 +2740,27 @@ function ptcgdm_render_builder(array $config = []){
           els.inventoryBulkChangePrice.dataset.busy = '1';
           els.inventoryBulkChangePrice.textContent = 'Loading…';
         }
+        let queuedCount = 0;
         selectedIds.forEach(cardId=>{
-          queueInventoryPriceChange(cardId);
+          const queued = queueInventoryPriceChange(cardId);
+          if(queued){
+            queuedCount++;
+          }
         });
         if(els.inventoryBulkChangePrice){
           els.inventoryBulkChangePrice.dataset.busy = '';
           els.inventoryBulkChangePrice.textContent = els.inventoryBulkChangePrice.dataset.defaultLabel || 'Bulk Change Price';
         }
-        const label = selectedIds.length === 1 ? 'card' : 'cards';
-        alert(`${selectedIds.length} ${label} added to the buffer for price updates.`);
+        if(queuedCount > 0){
+          const label = queuedCount === 1 ? 'card' : 'cards';
+          let message = `${queuedCount} ${label} added to the buffer for price updates.`;
+          if(queuedCount < selectedIds.length){
+            message += ` ${getInventoryBufferLimitMessage()}`;
+          }
+          alert(message);
+        }else{
+          alert('No cards were added to the buffer.');
+        }
         inventoryBulkSelection.clear();
         syncInventorySelectionsWithRows();
       }
