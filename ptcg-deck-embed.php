@@ -287,6 +287,66 @@ function ptcgdm_get_inventory_url_for_dataset($dataset_key = '') {
   return $url . rawurlencode(ptcgdm_get_inventory_filename_for_dataset($dataset_key));
 }
 
+function ptcgdm_build_inventory_backup_path($dataset_key = '', $timestamp = '') {
+  $dir = trailingslashit(ptcgdm_get_inventory_dir());
+  $base = pathinfo(ptcgdm_get_inventory_filename_for_dataset($dataset_key), PATHINFO_FILENAME);
+  $suffix = $timestamp !== '' ? $timestamp : gmdate('Ymd-His');
+  return $dir . sprintf('%s-backup-%s.json', $base, $suffix);
+}
+
+function ptcgdm_list_inventory_backups($dataset_key = '') {
+  $dir = trailingslashit(ptcgdm_get_inventory_dir());
+  $base = pathinfo(ptcgdm_get_inventory_filename_for_dataset($dataset_key), PATHINFO_FILENAME);
+  $pattern = $dir . $base . '-backup-*.json';
+  $files = glob($pattern);
+  if (!is_array($files)) {
+    return [];
+  }
+
+  usort($files, function ($a, $b) {
+    $timeA = file_exists($a) ? filemtime($a) : 0;
+    $timeB = file_exists($b) ? filemtime($b) : 0;
+    if ($timeA === $timeB) {
+      return strcmp($a, $b);
+    }
+    return ($timeA < $timeB) ? 1 : -1;
+  });
+
+  return $files;
+}
+
+function ptcgdm_prune_inventory_backups($dataset_key = '', $max_files = 5) {
+  $max_files = max(1, (int) $max_files);
+  $files = ptcgdm_list_inventory_backups($dataset_key);
+  if (count($files) <= $max_files) {
+    return;
+  }
+
+  $to_delete = array_slice($files, $max_files);
+  foreach ($to_delete as $file) {
+    if (is_string($file) && $file !== '' && file_exists($file)) {
+      @unlink($file);
+    }
+  }
+}
+
+function ptcgdm_create_inventory_backup($dataset_key = '') {
+  $path = ptcgdm_get_inventory_path_for_dataset($dataset_key);
+  if (!file_exists($path) || !is_readable($path)) {
+    return false;
+  }
+
+  ptcgdm_ensure_inventory_directory();
+  $backup_path = ptcgdm_build_inventory_backup_path($dataset_key, gmdate('Ymd-His'));
+
+  if (@copy($path, $backup_path)) {
+    ptcgdm_prune_inventory_backups($dataset_key, 5);
+    return $backup_path;
+  }
+
+  return false;
+}
+
 function ptcgdm_resolve_inventory_dataset_key($value = null) {
   if (is_array($value)) {
     foreach (['dataset', 'dataset_key', 'datasetKey'] as $candidate) {
@@ -6509,6 +6569,8 @@ function ptcgdm_run_inventory_sync_now($args = []) {
     ]), $dataset_key);
     return new WP_Error('ptcgdm_sync_unreadable', __('Inventory snapshot is not readable.', 'ptcgdm'));
   }
+
+  ptcgdm_create_inventory_backup($dataset_key);
 
   $raw = @file_get_contents($path);
   if ($raw === false) {
