@@ -699,8 +699,6 @@ function ptcgdm_render_builder(array $config = []){
       .btn.danger{background:linear-gradient(180deg,#ff4d4f,#d9363e)}
       .table-scroll{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px;margin:-4px 0 8px;padding:4px}
       .inventory-actions{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
-      .inventory-price-error td{background:#2a1a1d}
-      .inventory-price-field-error{border-color:#ff4d4f!important;box-shadow:0 0 0 1px rgba(255,77,79,.4)}
       .inventory-select-col,.inventory-select-cell{text-align:center;width:40px}
       .inventory-select-cell input[type="checkbox"]{width:16px;height:16px;margin:0}
       .sync-control{display:flex;flex-direction:column;gap:6px;min-width:180px}
@@ -3373,11 +3371,6 @@ function ptcgdm_render_builder(array $config = []){
                 variant.price = Number.isFinite(nextPrice) ? nextPrice : null;
                 cleanInventoryVariant(entry, variantKey);
                 ev.target.value = formatPriceInputValue(variant.price);
-                const rowEl = ev.target.closest('tr');
-                if(rowEl){
-                  rowEl.classList.remove('inventory-price-error');
-                }
-                ev.target.classList.remove('inventory-price-field-error');
                 updateJSON();
               });
             });
@@ -3411,77 +3404,6 @@ function ptcgdm_render_builder(array $config = []){
         return entries;
       }
 
-      function clearInventoryPriceErrors(){
-        if(!IS_INVENTORY || !els.deckBody) return;
-        els.deckBody.querySelectorAll('.inventory-price-error').forEach(row=>row.classList.remove('inventory-price-error'));
-        els.deckBody.querySelectorAll('.inventory-price-field-error').forEach(input=>input.classList.remove('inventory-price-field-error'));
-      }
-
-      function highlightInventoryPriceErrors(missingMap){
-        if(!IS_INVENTORY || !els.deckBody || !missingMap) return;
-        const rows = els.deckBody.querySelectorAll('tr[data-id]');
-        rows.forEach(row=>{
-          const id = row.getAttribute('data-id') || '';
-          if(!id || !missingMap.has(id)) return;
-          row.classList.add('inventory-price-error');
-          const variantKeys = new Set(missingMap.get(id)?.keys || []);
-          row.querySelectorAll('.variantPriceInput').forEach(input=>{
-            const key = input?.dataset?.variant;
-            if(key && variantKeys.has(key)){
-              input.classList.add('inventory-price-field-error');
-            }
-          });
-        });
-      }
-
-      function requireInventoryPrices(){
-        if(!IS_INVENTORY) return true;
-        clearInventoryPriceErrors();
-        if(!deck.length) return true;
-
-        const missing = new Map();
-        deck.forEach(entry=>{
-          if(!entry || !entry.id) return;
-          INVENTORY_VARIANTS.forEach(({ key, label })=>{
-            const variant = getInventoryVariant(entry, key);
-            const qtyRaw = variant && variant.qty !== undefined ? variant.qty : 0;
-            const qty = Number.isFinite(qtyRaw) ? qtyRaw : parseInt(qtyRaw, 10) || 0;
-            if(qty > 0){
-              const price = parsePriceValue(variant ? variant.price : null);
-              if(!Number.isFinite(price)){
-                if(!missing.has(entry.id)){
-                  missing.set(entry.id, { keys: [], labels: [] });
-                }
-                const info = missing.get(entry.id);
-                info.keys.push(key);
-                info.labels.push(label || key);
-              }
-            }
-          });
-        });
-
-        if(!missing.size) return true;
-
-        highlightInventoryPriceErrors(missing);
-
-        const lines = [];
-        missing.forEach((info, id)=>{
-          const meta = byId.get(id) || {};
-          const name = getCardDisplayName(meta) || id;
-          const setName = getCardSetLabel(meta);
-          const numberDisplay = getCardDisplayNumber(meta);
-          const parts = [];
-          if(setName) parts.push(setName);
-          if(numberDisplay) parts.push(numberDisplay);
-          const cardLabel = parts.length ? `${name} (${parts.join(' • ')})` : name;
-          const variantLabel = (info.labels || []).join(', ');
-          lines.push(`- ${cardLabel}: add a price for ${variantLabel}`);
-        });
-
-        alert('Add a price for each card with quantity before saving:\n' + lines.join('\n'));
-        return false;
-      }
-
       function renderSaveProgress(message){
         const textEl = els.saveProgressText;
         if (!textEl) return;
@@ -3507,9 +3429,6 @@ function ptcgdm_render_builder(array $config = []){
 
       async function saveDeck(){
         if (isSavingDeck) {
-          return;
-        }
-        if (IS_INVENTORY && !requireInventoryPrices()) {
           return;
         }
         isSavingDeck = true;
