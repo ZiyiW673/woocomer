@@ -5770,7 +5770,7 @@ function ptcgdm_output_managed_product_image_styles() {
   }
   $ptcgdm_styles_printed = true;
 
-  echo '<style id="ptcgdm-managed-product-image-styles">.ptcgdm-managed-product-image{object-fit:contain !important;background-color:transparent !important;}</style>';
+  echo '<style id="ptcgdm-managed-product-image-styles">.ptcgdm-managed-product-image{object-fit:contain !important;background-color:transparent !important;}.woocommerce-order-details .ptcgdm-managed-product-image,.woocommerce-table--order-details .ptcgdm-managed-product-image{max-width:140px;max-height:140px;height:auto;width:auto;}</style>';
 }
 
 add_action('wp_head', 'ptcgdm_output_managed_product_image_styles');
