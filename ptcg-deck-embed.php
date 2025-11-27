@@ -3510,10 +3510,14 @@ function ptcgdm_render_builder(array $config = []){
               const variantData = getInventoryVariant(d, key);
               if(key === SPECIAL_PATTERN_KEY){
                 const patterns = ensureSpecialPatternSlots(variantData);
+                const nextPlaceholderIndex = patterns.findIndex(slot=>!isSpecialPatternSlotActive(slot));
                 const blocks = patterns.map((pattern, slotIndex)=>{
                   const isActive = isSpecialPatternSlotActive(pattern);
-                  if(!isActive){
+                  if(!isActive && slotIndex === nextPlaceholderIndex){
                     return `<button type="button" class="special-pattern-placeholder" data-variant="${key}" data-slot="${slotIndex}">Add pattern</button>`;
+                  }
+                  if(!isActive){
+                    return '';
                   }
                   const qtyRaw = pattern && pattern.qty !== undefined ? pattern.qty : 0;
                   const qtyValue = Number.isFinite(qtyRaw) ? qtyRaw : parseInt(qtyRaw, 10) || 0;
