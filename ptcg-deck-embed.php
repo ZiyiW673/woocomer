@@ -701,7 +701,7 @@ function ptcgdm_render_builder(array $config = []){
       .inventory-actions{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
       .special-pattern-cell{min-width:260px}
       .special-pattern-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:8px}
-      .special-pattern-block{background:#0f1218;border:1px solid var(--line);border-radius:10px;padding:6px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;align-items:center}
+      .special-pattern-block{background:#0f1218;border:1px solid var(--line);border-radius:10px;padding:6px;display:grid;grid-template-columns:1fr 1fr 2fr;gap:6px;align-items:center}
       .special-pattern-label{grid-column:1/-1;font-size:11px;color:var(--muted);margin:0}
       .special-pattern-input{width:100%;padding:6px 8px;font-size:12px;border-radius:8px;border:1px solid #262c39;background:#12151b;color:var(--ink)}
       .inventory-select-col,.inventory-select-cell{text-align:center;width:40px}
