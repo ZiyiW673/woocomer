@@ -2143,20 +2143,23 @@ function ptcgdm_render_builder(array $config = []){
             return;
           }
           const card = byId.get(cardId);
+          const existedBefore = deckMap.has(cardId);
           const delta = applyDeckQuantity(cardId, parsed.qty, parsed.variantQuantities);
+          const existsAfter = deckMap.has(cardId);
+          const addedEmptyEntry = !existedBefore && existsAfter && parsed && !parsed.hasQuantities && delta === 0;
           if(delta === null){
             const deckError = consumeDeckError();
             const message = deckError || 'Unable to add card.';
             errors.push(`Line ${idx+1}: ${message}`);
             return;
           }
-          if(delta === 0){
+          if(delta === 0 && !addedEmptyEntry){
             const maxLabel = `${parsed.setCodeDisplay} ${parsed.numberDisplay}`;
             errors.push(`Line ${idx+1}: ${maxLabel} already at maximum quantity.`);
             return;
           }
           totalDelta += delta;
-          changedDeck = true;
+          changedDeck = changedDeck || addedEmptyEntry || delta !== 0;
           const cardName = getCardDisplayName(card) || parsed.name || `${parsed.setCodeDisplay} ${parsed.numberDisplay}`;
           const numberDisplay = getCardDisplayNumber(card) || parsed.numberDisplay;
           successes.push({qty: delta, name: cardName, code: parsed.setCodeDisplay, number: numberDisplay});
@@ -2268,12 +2271,10 @@ function ptcgdm_render_builder(array $config = []){
           let variantQuantities = quantityResult?.variantQuantities || {};
           let totalQty = quantityResult?.totalQty || 0;
           const hasExplicitQuantities = !!quantityResult?.hasQuantities;
-          if(!hasExplicitQuantities){
-            const fallbackVariant = INVENTORY_VARIANTS[0]?.key || 'normal';
-            if(fallbackVariant){
-              variantQuantities = Object.assign({}, variantQuantities, { [fallbackVariant]: 1 });
-            }
-            totalQty = 1;
+          const hasQuantities = !!hasExplicitQuantities;
+          if(!hasQuantities){
+            variantQuantities = Object.assign({}, variantQuantities);
+            totalQty = 0;
           }
           return {
             qty: totalQty,
@@ -2282,6 +2283,7 @@ function ptcgdm_render_builder(array $config = []){
             number: lookupNumber,
             numberDisplay: sanitisedNumber.toUpperCase(),
             variantQuantities,
+            hasQuantities,
           };
         }
         const parts = trimmedLine.split(/\s+/);
