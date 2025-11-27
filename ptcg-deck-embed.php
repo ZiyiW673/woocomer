@@ -700,7 +700,7 @@ function ptcgdm_render_builder(array $config = []){
       .table-scroll{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px;margin:-4px 0 8px;padding:4px}
       .inventory-actions{display:flex;gap:8px;align-items:center;flex-wrap:nowrap}
       .special-pattern-cell{min-width:260px}
-      .special-pattern-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));gap:8px}
+      .special-pattern-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:minmax(0,1fr);gap:8px}
       .special-pattern-block{border:1px solid var(--line);border-radius:10px;padding:4px;display:grid;grid-template-columns:1fr 1fr 2fr;gap:4px;align-items:center}
       .special-pattern-placeholder{border:1px dashed var(--line);border-radius:10px;padding:4px;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted);background:transparent;cursor:pointer;min-height:56px;width:100%}
       .special-pattern-input{width:100%;padding:3px 6px;font-size:12px;border-radius:8px;border:1px solid #262c39;background:#12151b;color:var(--ink)}
