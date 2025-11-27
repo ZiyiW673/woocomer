@@ -3199,13 +3199,28 @@ function ptcgdm_render_builder(array $config = []){
             variantKeys.forEach((key)=>{
               const variant = variants[key];
               if(!variant || typeof variant !== 'object') return;
-              const qtyRaw = variant.qty !== undefined ? variant.qty : 0;
-              const qty = Number.isFinite(qtyRaw) ? qtyRaw : parseInt(qtyRaw, 10) || 0;
-              const priceValue = Number.isFinite(variant.price) ? variant.price : parsePriceValue(variant.price);
-              if(qty > 0 || Number.isFinite(priceValue)){
+              let qtyRaw = variant.qty !== undefined ? variant.qty : 0;
+              let qty = Number.isFinite(qtyRaw) ? qtyRaw : parseInt(qtyRaw, 10) || 0;
+              let priceValue = Number.isFinite(variant.price) ? variant.price : parsePriceValue(variant.price);
+              const patterns = key === SPECIAL_PATTERN_KEY ? normalizeSpecialPatternArray(variant.patterns) : null;
+              const hasPatterns = key === SPECIAL_PATTERN_KEY && hasSpecialPatternData({ patterns });
+
+              if(key === SPECIAL_PATTERN_KEY){
+                const temp = { qty, price: priceValue, patterns };
+                recomputeSpecialPatternVariant(temp);
+                qty = temp.qty;
+                if(!Number.isFinite(priceValue) && Number.isFinite(temp.price)){
+                  priceValue = temp.price;
+                }
+              }
+
+              if(qty > 0 || Number.isFinite(priceValue) || hasPatterns){
                 record.variants[key] = { qty };
                 if(Number.isFinite(priceValue)){
                   record.variants[key].price = priceValue;
+                }
+                if(hasPatterns){
+                  record.variants[key].patterns = patterns;
                 }
                 if(qty > 0){
                   totalQty += qty;
