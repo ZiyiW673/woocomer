@@ -2394,14 +2394,15 @@ function ptcgdm_render_builder(array $config = []){
               const slashIndex = sanitisedNumber.indexOf('/');
               const lookupNumber = slashIndex >= 0 ? sanitisedNumber.slice(0, slashIndex) : sanitisedNumber;
               if(!lookupNumber) return { error: 'Missing card number.' };
+              const combinedNumber = `${sanitisedSet}-${lookupNumber}`;
               const variantQuantities = { normal: parsedQty };
               const hasQuantities = true;
               return {
                 qty: parsedQty,
                 setCode: sanitisedSet,
                 setCodeDisplay: sanitisedSet.toUpperCase(),
-                number: lookupNumber,
-                numberDisplay: sanitisedNumber.toUpperCase(),
+                number: combinedNumber,
+                numberDisplay: `${sanitisedSet}-${sanitisedNumber}`.toUpperCase(),
                 variantQuantities,
                 hasQuantities,
               };
