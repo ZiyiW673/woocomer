@@ -14,7 +14,13 @@ function ptcgdm_get_admin_ui_content() {
   if (function_exists('ptcgdm_render_inventory')) {
     ob_start();
     ptcgdm_render_inventory();
-    return ob_get_clean();
+    $content = ob_get_clean();
+
+    // Strip the default inventory heading and description for the public Admin UI page only.
+    $content = preg_replace('~<h1[^>]*>\\s*PTCG Deck \xe2\x80\x93 Card Inventory\\s*</h1>~ui', '', $content);
+    $content = preg_replace('~<p[^>]*class="description"[^>]*>\\s*Maintain a single card inventory list using the local dataset\.\\s*</p>~ui', '', $content);
+
+    return $content;
   }
 
   return '<div class="wrap"><h1>Inventory Management</h1><p>Inventory UI is unavailable.</p></div>';
