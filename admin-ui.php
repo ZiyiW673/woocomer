@@ -542,14 +542,25 @@ add_action('wp_ajax_ptcgdm_update_order_status', 'ptcgdm_handle_update_order_sta
 function ptcgdm_guard_admin_ui_page() {
   $page_id = (int) get_option('ptcgdm_admin_ui_page_id', 0);
 
-  if ($page_id > 0 && is_page($page_id)) {
-    if (!is_user_logged_in()) {
-      auth_redirect();
-    }
+  if ($page_id <= 0 || !is_page($page_id)) {
+    return;
+  }
 
-    if (!current_user_can('administrator')) {
-      wp_die(__('You do not have permission to access this page.'), '', ['response' => 403]);
-    }
+  $page = get_post($page_id);
+  if (!$page instanceof WP_Post) {
+    return;
+  }
+
+  if (!has_shortcode($page->post_content, 'ptcg_admin_ui')) {
+    return;
+  }
+
+  if (!is_user_logged_in()) {
+    auth_redirect();
+  }
+
+  if (!current_user_can('administrator')) {
+    wp_die(__('You do not have permission to access this page.'), '', ['response' => 403]);
   }
 }
 add_action('template_redirect', 'ptcgdm_guard_admin_ui_page');
