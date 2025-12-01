@@ -39,6 +39,72 @@ function ptcgdm_capture_admin_ui_panel($callback) {
 }
 
 /**
+ * Render a simple WooCommerce orders list for the Admin UI page.
+ */
+function ptcgdm_render_admin_orders_panel() {
+  echo '<div class="wrap"><h2>Orders</h2>';
+
+  if (!function_exists('wc_get_orders')) {
+    echo '<p class="ptcgdm-orders__empty">WooCommerce is not available.</p>';
+    echo '</div>';
+    return;
+  }
+
+  $orders = wc_get_orders([
+    'limit'   => 20,
+    'orderby' => 'date',
+    'order'   => 'DESC',
+  ]);
+
+  if (empty($orders)) {
+    echo '<p class="ptcgdm-orders__empty">No orders found.</p>';
+    echo '</div>';
+    return;
+  }
+
+  echo '<table class="ptcgdm-orders__table">';
+  echo '<thead><tr>';
+  echo '<th scope="col">Order</th>';
+  echo '<th scope="col">Date</th>';
+  echo '<th scope="col">Status</th>';
+  echo '<th scope="col">Total</th>';
+  echo '<th scope="col">Customer</th>';
+  echo '</tr></thead>';
+  echo '<tbody>';
+
+  foreach ($orders as $order) {
+    if (!$order instanceof WC_Order) {
+      continue;
+    }
+
+    $order_number = esc_html($order->get_order_number());
+    $status       = esc_html(wc_get_order_status_name($order->get_status()));
+
+    $date_created = $order->get_date_created();
+    $date_label   = $date_created ? esc_html($date_created->date_i18n(get_option('date_format') . ' ' . get_option('time_format'))) : '-';
+
+    $customer_name = esc_html($order->get_formatted_billing_full_name() ?: __('Guest', 'woocommerce'));
+
+    $total = $order->get_formatted_order_total();
+    if (!is_string($total)) {
+      $total = wc_price($order->get_total());
+    }
+
+    echo '<tr>';
+    echo '<td>#' . $order_number . '</td>';
+    echo '<td>' . $date_label . '</td>';
+    echo '<td>' . $status . '</td>';
+    echo '<td>' . wp_kses_post($total) . '</td>';
+    echo '<td>' . $customer_name . '</td>';
+    echo '</tr>';
+  }
+
+  echo '</tbody>';
+  echo '</table>';
+  echo '</div>';
+}
+
+/**
  * Build the inventory management markup for the public page/shortcode.
  *
  * @return string
@@ -52,6 +118,10 @@ function ptcgdm_get_admin_ui_content() {
     'one_piece' => [
       'label'   => 'One Piece Inventory',
       'content' => ptcgdm_capture_admin_ui_panel('ptcgdm_render_one_piece_inventory'),
+    ],
+    'orders' => [
+      'label'   => 'Orders',
+      'content' => ptcgdm_capture_admin_ui_panel('ptcgdm_render_admin_orders_panel'),
     ],
   ];
 
@@ -69,6 +139,11 @@ function ptcgdm_get_admin_ui_content() {
       .ptcgdm-admin-ui__content { min-height: 360px; }
       .ptcgdm-admin-ui__panel { display: none; }
       .ptcgdm-admin-ui__panel.is-active { display: block; }
+      .ptcgdm-orders__table { width: 100%; border-collapse: collapse; background: #0f1218; border: 1px solid #1f2533; border-radius: 12px; overflow: hidden; }
+      .ptcgdm-orders__table th, .ptcgdm-orders__table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #1f2533; color: #cfd6e6; }
+      .ptcgdm-orders__table th { background: #111725; font-weight: 700; }
+      .ptcgdm-orders__table tr:last-child td { border-bottom: none; }
+      .ptcgdm-orders__empty { padding: 12px; background: #0f1218; border: 1px solid #1f2533; border-radius: 12px; color: #cfd6e6; }
       @media (max-width: 900px) {
         .ptcgdm-admin-ui__shell { grid-template-columns: 1fr; }
         .ptcgdm-admin-ui__sidebar { position: static; }
