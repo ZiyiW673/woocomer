@@ -540,6 +540,10 @@ add_action('wp_ajax_ptcgdm_update_order_status', 'ptcgdm_handle_update_order_sta
  * Restrict the public Admin UI page to administrators.
  */
 function ptcgdm_guard_admin_ui_page() {
+  if (is_admin()) {
+    return;
+  }
+
   $page_id = (int) get_option('ptcgdm_admin_ui_page_id', 0);
 
   if ($page_id <= 0 || !is_page($page_id)) {
