@@ -26,7 +26,15 @@ define('PTCGDM_INVENTORY_VARIANTS', [
 require_once PTCGDM_DIR . 'admin-ui.php';
 
 register_activation_hook(PTCGDM_PLUGIN_FILE, 'ptcgdm_ensure_admin_ui_page_exists');
-add_action('init', 'ptcgdm_ensure_admin_ui_page_exists');
+
+function ptcgdm_maybe_seed_admin_ui_page() {
+  if (is_admin()) {
+    return;
+  }
+
+  ptcgdm_ensure_admin_ui_page_exists();
+}
+add_action('init', 'ptcgdm_maybe_seed_admin_ui_page');
 
 function ptcgdm_get_dataset_definitions() {
   static $definitions = null;
